@@ -1,0 +1,122 @@
+vars:
+  - config/MLNav/params.yaml:reader,process,normalize,model,reports
+
+stages:
+  env_variables:
+    cmd: export OPENBLAS_NUM_THREADS=64 && export NUM_THREADS=64 && export OMP_NUM_THREADS=64
+    always_changed: true
+
+  process_data:
+    desc: Read directory and process all datasets into a single processed one.
+    cmd: python3 src/mlnav/pipes/process_data.py -c config/MLNav/params.yaml -g DEBUG
+    params:
+      - config/MLNav/params.yaml:
+        - reader
+        - process
+    deps:
+      - ${reader.path}
+      - src/mlnav/pipes/process_data.py
+    outs:
+      - ${process.path}${process.name}:
+          cache: true
+          push: true
+  
+  data_reports:
+    desc: .
+    cmd: python3 src/mlnav/pipes/data_reports.py -c config/MLNav/params.yaml -g DEBUG
+    params:
+      - config/MLNav/params.yaml:
+        - process
+        - reports
+    deps:
+      - ${process.path}${process.name}
+      - src/mlnav/pipes/data_reports.py
+    outs:
+      - ${reports.path}${reports.data_plots.path}:
+          cache: true
+          push: true
+  
+  normalize_data:
+    desc: Normalize the entire dataset.
+    cmd: python3 src/mlnav/pipes/normalize_data.py -c config/MLNav/params.yaml -g DEBUG
+    params:
+      - config/MLNav/params.yaml:
+        - process
+        - normalize
+    deps:
+      - ${process.path}${process.name}
+      - src/mlnav/pipes/normalize_data.py
+    outs:
+      - ${normalize.path}${normalize.name}:
+          cache: true
+          push: true
+      - ${normalize.transformers_path}:
+          cache: true
+          push: true
+  
+  train_model:
+    desc: Training a KMeans model using the normalized dataset.
+    cmd: python3 src/mlnav/pipes/train_model.py -c config/MLNav/params.yaml -g DEBUG
+    params:
+      - config/MLNav/params.yaml:
+        - normalize
+        - model
+    deps:
+      - ${normalize.path}${normalize.name}
+      - src/mlnav/pipes/train_model.py
+    outs:
+      - ${model.path}${model.trials.path}:
+          cache: true
+          push: true
+      - ${model.path}${model.name}:
+          cache: true
+          push: true
+
+  evaluate_model:
+    desc: Evaluate a KMeans model previously trained.
+    cmd: python3 src/mlnav/pipes/evaluate_model.py -c config/MLNav/params.yaml -g DEBUG
+    params:
+      - config/MLNav/params.yaml:
+        - normalize
+        - model
+        - reports
+    deps:
+      - ${model.path}${model.name}
+      - src/mlnav/pipes/evaluate_model.py
+    outs:
+      - ${reports.path}${reports.evaluation.unsupervised_metrics.name}:
+          cache: false
+
+  predict_data:
+    desc: Predict normalized data or process data giving transformers directory using KMeans model.
+    cmd: python3 src/mlnav/pipes/predict_data.py -c config/MLNav/params.yaml -g DEBUG
+    params:
+      - config/MLNav/params.yaml:
+        - process
+        - normalize
+        - model
+        - reports
+    deps:
+      - ${process.path}${process.name}
+      - ${normalize.path}${normalize.name}
+      - ${model.path}${model.name}
+      - src/mlnav/pipes/predict_data.py
+    outs:
+      - ${reports.path}${reports.predictions.name}:
+          cache: true
+          push: true
+
+  model_reports:
+    desc: <Placeholder>
+    cmd: python3 src/mlnav/pipes/model_reports.py -c config/MLNav/params.yaml -g DEBUG
+    params:
+      - config/MLNav/params.yaml:
+        - process
+        - reports
+    deps:
+      - ${process.path}${process.name}
+      - ${reports.path}${reports.predictions.name}
+      - src/mlnav/pipes/model_reports.py
+    outs:
+      - ${reports.path}${reports.model_plots.path}:
+          cache: true
