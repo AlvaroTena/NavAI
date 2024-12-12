@@ -1,0 +1,7 @@
+from scipy.constants import speed_of_light
+
+COMPUTE_INPUT_DATA_WITHOUT_TIME = 1
+COMPUTE_INPUT_DATA_WITH_TIME = 2
+COMPUTE_INPUT_DATA_WITH_TIME_DELAY_TAG = 3
+
+SPEED_OF_LIGHT = speed_of_light

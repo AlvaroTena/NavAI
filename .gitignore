@@ -1,0 +1,7 @@
+**.egg-info
+out**
+.vscode**
+**__pycache__**
+.neptune
+.venv**
+.env

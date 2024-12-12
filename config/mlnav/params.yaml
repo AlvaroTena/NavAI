@@ -1,0 +1,68 @@
+base:
+  project: MLNav
+
+reader:
+  path: data/MLNav/scenario_931v2/raw
+  n_files: -1
+
+process:
+  path: data/MLNav/scenario_931v2/processed/
+  name: AI_Multipath_Processed.h5
+
+normalize:
+  path: data/MLNav/scenario_931v2/normalized/
+  name: AI_Multipath_Normalized.h5
+  transformers_path: data/MLNav/retrain/transformers/
+
+model:
+  path: data/MLNav/retrain/models/
+  name: model.joblib
+  
+  trials: 
+    path: trials/
+    name: trials.pkl
+
+  train:
+    chunksize: 0
+    hyperparameter_tunning: true #if false, grid first position of each param will be taken
+    hyperparameter_tunning_iters: 32
+    param_grid:
+      n_clusters: [2, 3, 4, 5, 6]
+      init: [k-means++, random]
+      n_init: [auto, 5]
+      max_iter: [100, 300, 500, 1000]
+      tol: [0.00001, 0.0001, 0.001, 0.01]
+      algorithm: [lloyd, elkan]
+      random_state: [42]
+      copy_x: [true]
+      verbose: [0]
+
+reports:
+  path: data/MLNav/scenario_931v2/reports/
+  
+  predictions:
+    name: AI_Multipath_Predictions.h5
+
+  data_plots:
+    path: data_plots/
+
+    constellation_plot: true
+    box_plot: true
+    density_plot: true
+
+  model_plots:
+    path: model_plots/
+
+    cluster_pairplots: true
+    pairplots2d: true
+    pairplots3d: false
+
+  evaluation:
+    unsupervised_metrics:
+      name: metrics.json
+      silhouette: true
+      silhouette_show: false
+      silhouette_save: false
+      silhouette_split: 5000
+      calinski_harabasz: true
+      davies_bouldin_score: true

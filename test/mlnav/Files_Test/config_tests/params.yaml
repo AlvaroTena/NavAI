@@ -1,0 +1,5 @@
+test:
+  string: "hello"
+other:
+  number: 3
+  boolean: True
