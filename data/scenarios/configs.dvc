@@ -1,0 +1,6 @@
+outs:
+- md5: dac7595213d7e60c3f0f9fc80fbb523b.dir
+  size: 14983
+  nfiles: 9
+  hash: md5
+  path: configs

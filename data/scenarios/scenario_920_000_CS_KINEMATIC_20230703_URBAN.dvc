@@ -1,0 +1,6 @@
+outs:
+- md5: d2c7aaca061f7b9ba3f728e7bb443fa2.dir
+  size: 606736512
+  nfiles: 5
+  hash: md5
+  path: scenario_920_000_CS_KINEMATIC_20230703_URBAN

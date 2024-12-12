@@ -1,0 +1,6 @@
+outs:
+- md5: 736555e779c402d0cf2bda85b45c9cf5.dir
+  size: 143870926
+  nfiles: 6
+  hash: md5
+  path: scenario_915_000_CS_KINEMATIC_20230522_SEMIURBAN_1

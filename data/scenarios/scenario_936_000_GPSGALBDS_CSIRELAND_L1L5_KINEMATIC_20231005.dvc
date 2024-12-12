@@ -1,0 +1,6 @@
+outs:
+- md5: 44d8984e98388cf0584708ec0263463a.dir
+  size: 241616536
+  nfiles: 5
+  hash: md5
+  path: scenario_936_000_GPSGALBDS_CSIRELAND_L1L5_KINEMATIC_20231005
