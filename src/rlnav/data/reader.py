@@ -71,11 +71,14 @@ class Reader:
 
     @staticmethod
     def read_file(
-        repo_dir,
         file_path,
+        repo_dir: str = None,
     ):
         """Perform parsing, casting and concatenating"""
-        file = os.path.join(repo_dir, file_path)
+        if repo_dir is not None:
+            file = os.path.join(repo_dir, file_path)
+        else:
+            file = file_path
 
         Logger.log_message(
             Logger.Category.DEBUG,
@@ -114,11 +117,11 @@ class Reader:
 
     @staticmethod
     def read_and_process(
-        repo_dir,
         file_path,
         config_signals,
         drop_nan_rows: bool = True,
         drop_outliers: Union[bool, int, float] = False,
+        repo_dir: str = None,
     ) -> pd.DataFrame:
         df = Reader.read_file(repo_dir, file_path)
         return DataProcessor(

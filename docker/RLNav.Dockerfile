@@ -43,6 +43,7 @@ RUN pip3 install pygit2 \
     tables \
     pyarrow \
     tf-agents \
+    tf-models-official \
     neptune \
     neptune-tensorboard \
     folium \

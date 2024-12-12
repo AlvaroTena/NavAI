@@ -23,7 +23,9 @@ def p_read_and_process(data_filepath, config_signals):
     )
 
     df = Reader.read_and_process(
-        base_config.scenarios.path, data_filepath, config_signals
+        repo_dir=base_config.scenarios.path,
+        file_path=data_filepath,
+        config_signals=config_signals,
     )
 
     df.to_parquet(

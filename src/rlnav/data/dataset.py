@@ -10,6 +10,7 @@ from tf_agents.specs import array_spec
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
 from rlnav.data.process import DataProcessor
+from rlnav.data.reader import Reader
 from rlnav.data.transform import ColumnTransformer
 from rlnav.types.utils import get_global_sat_idx
 
@@ -41,6 +42,13 @@ class RLDataset:
         self.reset_times()
         times.update(self.processor.get_times())
         return times
+
+    def read_data(self, raw_data_filepath: str):
+        dataframe = Reader().read_file(file_path=raw_data_filepath)
+        processed_data = self.processor.preprocess_batch(dataframe, verbose=False)
+
+        if not processed_data.empty:
+            self.data_buffer = pd.concat([self.data_buffer, processed_data])
 
     def process_data(
         self, raw_dataframe: pd.DataFrame, observation_spec: array_spec.BoundedArraySpec
@@ -108,10 +116,10 @@ class RLDataset:
             [transformed_df, timeseries_buffer, elevation_buffer], axis="columns"
         )
 
-        transformed_df = self.transformer.transform(
-            transformed_df[const.PROCESSED_FEATURE_LIST]
-        )
-        return transformed_df
+        # transformed_df = self.transformer.transform(
+        #     transformed_df[const.PROCESSED_FEATURE_LIST]
+        # )
+        return transformed_df[const.PROCESSED_FEATURE_LIST]
 
     def transform_to_observation_spec(
         self,
