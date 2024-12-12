@@ -152,7 +152,9 @@ class RLDataset:
             }
 
             # Convertir las características a un array de NumPy
-            features_array = transformed_df[const.PROCESSED_FEATURE_LIST].to_numpy()
+            features_array = transformed_df.to_numpy()[
+                ..., -(observation_array.shape[-1] - 1) :
+            ]
             features_array = np.hstack(
                 (
                     np.ones((features_array.shape[0], 1), dtype=np.float32),
@@ -168,7 +170,11 @@ class RLDataset:
 
             # Llenar el array de observación utilizando los índices para la ubicación directa
             for epoch, cons, sat, freq, features in zip(
-                epochs, cons_idx, sat_idx, freq_idx, features_array
+                epochs,
+                cons_idx,
+                sat_idx,
+                freq_idx,
+                features_array,
             ):
                 if epoch in epoch_to_idx:
                     observation_array[

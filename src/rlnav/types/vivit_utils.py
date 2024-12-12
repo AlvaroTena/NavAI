@@ -24,30 +24,44 @@ def data_generator(dataset, data_shape, transform_fn):
         attention_mask = (obs[..., 0]).astype(np.int32)  # Extract attention mask
         obs = obs[..., 1:]  # Extract features
 
-        y_true = np.concatenate([np.expand_dims(attention_mask, axis=-1), obs], axis=-1)
+        obs_channel_1, obs_channel_2 = np.split(obs, C, axis=1)
+        obs = np.concatenate(
+            [
+                np.expand_dims(obs_channel_1, axis=-1),
+                np.expand_dims(obs_channel_2, axis=-1),
+            ],
+            axis=-1,
+        )
+        assert obs.shape == data_shape
+
+        attention_mask = np.expand_dims(attention_mask, axis=-1)
+        attention_mask_channel_1, attention_mask_channel_2 = np.split(
+            attention_mask, C, axis=1
+        )
+        attention_mask = np.concatenate(
+            [
+                np.expand_dims(attention_mask_channel_1, axis=-1),
+                np.expand_dims(attention_mask_channel_2, axis=-1),
+            ],
+            axis=-1,
+        )
+        attention_mask = np.tile(attention_mask, (1, 1, W, 1))
+        assert attention_mask.shape == (T, H, W, C)
+
+        y_true = np.concatenate(
+            [np.expand_dims(attention_mask[..., 0, :], axis=-2), obs], axis=-2
+        )
+        assert y_true.shape == (T, H, W + 1, C)
 
         # Convert to tensors
         obs_tensor = tf.convert_to_tensor(obs, dtype=tf.float32)
         attention_mask_tensor = tf.convert_to_tensor(attention_mask, dtype=tf.int32)
         y_true_tensor = tf.convert_to_tensor(y_true, dtype=tf.float32)
 
-        # Adjust shapes
-        obs_tensor = tf.expand_dims(obs_tensor, axis=-1)  # Add channel dimension
-        y_true_tensor = tf.expand_dims(y_true_tensor, axis=-1)
-        attention_mask_expanded = tf.expand_dims(
-            attention_mask_tensor, axis=-1
-        )  # Add channel dimension
-        attention_mask_expanded = tf.tile(
-            attention_mask_expanded, [1, 1, W]
-        )  # Repeat along width
-        attention_mask_expanded = tf.expand_dims(
-            attention_mask_expanded, axis=-1
-        )  # Add channel dimension
-
         # Prepare inputs and outputs for the model
         inputs = {
             "input_observations": obs_tensor,
-            "attention_mask": attention_mask_expanded,
+            "attention_mask": attention_mask_tensor,
         }
         outputs = y_true_tensor
 
@@ -64,68 +78,52 @@ def generate_sequence_comparison_gif(
     row_labels,
     num_frames=100,
     save_path="sequence.gif",
+    combine_channels=False,
 ):
     """
-    Generates a GIF comparing ground truth observations, predictions, and their differences.
+    Generates a GIF comparing ground truth observations, predictions, and their differences for 2 channels.
 
     Args:
-        ground_truth (np.ndarray): Array of ground truth observations. Shape: (batch_size, time_steps, width, height, channels).
-        predictions (np.ndarray): Array of predicted observations. Shape: (batch_size, time_steps, width, height, channels).
-        attention_mask (np.ndarray): Attention mask to apply to the observations. Shape: (batch_size, time_steps, width, height, channels).
-        reverse_scaling (callable): Function to reverse the scaling transformation applied to the observations.
-        obs_min (float): Minimum value for observation normalization.
-        obs_max (float): Maximum value for observation normalization.
-        row_labels (list of str): Labels for each row in the visualized sequence.
-        num_frames (int): Number of frames in the animation. Default is 100.
-        save_path (str): Path to save the resulting GIF. Default is "sequence.gif".
+        ground_truth (np.ndarray): Ground truth data. Shape: (time_steps, width, height, channels).
+        predictions (np.ndarray): Predicted data. Shape: (batch_size, time_steps, width, height, channels).
+        attention_mask (np.ndarray): Attention mask. Shape: (time_steps, width, height, channels).
+        reverse_scaling (callable): Function to reverse scaling transformations.
+        obs_min (float): Minimum observation value for normalization.
+        obs_max (float): Maximum observation value for normalization.
+        row_labels (list of str): Labels for rows in visualized sequence.
+        num_frames (int): Number of frames in the animation.
+        save_path (str): Path to save the resulting GIF.
+        combine_channels (bool): If True, combines the two channels into one visualization.
 
     Returns:
         str: Path to the saved GIF file.
     """
 
-    # Remove batch and channel dimensions
-    predictions = np.squeeze(
-        predictions, axis=(0, -1)
-    )  # Shape: (time_steps, width, height)
-    ground_truth = np.squeeze(
-        ground_truth, axis=-1
-    )  # Shape: (time_steps, width, height)
-    attention_mask = np.squeeze(
-        attention_mask, axis=-1
-    )  # Shape: (time_steps, width, height)
+    T, H, W, C = ground_truth.shape
+    # Remove batch dimension
+    predictions = np.squeeze(predictions, axis=0)
 
-    # Reshape and reverse scaling for specific channels
-    data_shape = ground_truth.shape
-    ground_truth = ground_truth.reshape(-1, data_shape[-1])
-    predictions = predictions.reshape(-1, data_shape[-1])
+    # Reverse scaling
+    ground_truth = ground_truth.transpose(0, 1, 3, 2)
+    ground_truth = ground_truth.reshape(-1, W)
+    predictions = predictions.transpose(0, 1, 3, 2)
+    predictions = predictions.reshape(-1, W)
 
-    n_timestamps_features = len(const.PROCESSED_TIMESERIES_LIST)
-    ground_truth[..., n_timestamps_features:] = reverse_scaling(
-        ground_truth[..., n_timestamps_features:]
-    )
-    predictions[..., n_timestamps_features:] = reverse_scaling(
-        predictions[..., n_timestamps_features:]
-    )
+    ground_truth = reverse_scaling(ground_truth)
+    predictions = reverse_scaling(predictions)
 
-    ground_truth = ground_truth.reshape(data_shape)
-    predictions = predictions.reshape(data_shape)
+    ground_truth = ground_truth.reshape(T, H, C, W)
+    ground_truth = ground_truth.transpose(0, 1, 3, 2)
+    predictions = predictions.reshape(T, H, C, W)
+    predictions = predictions.transpose(0, 1, 3, 2)
 
-    # Transpose arrays to align with visualization (time_steps, height, width)
-    ground_truth = np.transpose(ground_truth, (0, 2, 1))
-    predictions = np.transpose(predictions, (0, 2, 1))
-    attention_mask = np.transpose(attention_mask, (0, 2, 1))
-
-    # Calculate difference
-    difference = np.abs(ground_truth - predictions)
-
-    # Normalize data to [0, 1] range
+    # Normalize data
     ground_truth = np.clip((ground_truth - obs_min) / (obs_max - obs_min + 1e-9), 0, 1)
     predictions = np.clip((predictions - obs_min) / (obs_max - obs_min + 1e-9), 0, 1)
-    diff_min = np.min(difference, axis=(0, 2), keepdims=True)
-    diff_max = np.max(difference, axis=(0, 2), keepdims=True)
-    difference = np.clip((difference - diff_min) / (diff_max - diff_min + 1e-9), 0, 1)
-
-    # Scale to 255 for visualization
+    difference = np.abs(ground_truth - predictions)
+    difference = np.clip(
+        (difference - np.min(difference)) / (np.max(difference) + 1e-9), 0, 1
+    )
     ground_truth *= 255
     predictions *= 255
     difference *= 255
@@ -135,48 +133,117 @@ def generate_sequence_comparison_gif(
     predictions *= attention_mask
     difference *= attention_mask
 
+    ground_truth = ground_truth.transpose(0, 2, 1, 3)
+    predictions = predictions.transpose(0, 2, 1, 3)
+    difference = difference.transpose(0, 2, 1, 3)
+
     # Initialize figure
-    fig, axes = plt.subplots(1, 3, figsize=(30, 10))
+    fig, axes = plt.subplots(2 if not combine_channels else 1, 3, figsize=(30, 20))
     fig.suptitle("Ground Truth vs Prediction vs Difference")
 
-    ax_gt, ax_pred, ax_diff = axes
-    im_gt = ax_gt.imshow(
-        ground_truth[0],
-        cmap="gray",
-        vmin=0,
-        vmax=255,
-        interpolation="nearest",
-        aspect="auto",
-    )
-    im_pred = ax_pred.imshow(
-        predictions[0],
-        cmap="gray",
-        vmin=0,
-        vmax=255,
-        interpolation="nearest",
-        aspect="auto",
-    )
-    im_diff = ax_diff.imshow(
-        difference[0],
-        cmap="hot",
-        vmin=0,
-        vmax=255,
-        interpolation="nearest",
-        aspect="auto",
-    )
+    # Split channels for visualization
+    channel_1_gt, channel_2_gt = ground_truth[..., 0], ground_truth[..., 1]
+    channel_1_pred, channel_2_pred = predictions[..., 0], predictions[..., 1]
+    channel_1_diff, channel_2_diff = difference[..., 0], difference[..., 1]
 
-    # Add labels and grid
-    for ax, title in zip(axes, ["Ground Truth", "Prediction", "Difference"]):
-        ax.set_title(title)
-        ax.set_yticks(np.arange(len(row_labels)))
-        ax.set_yticklabels(row_labels, fontsize=12)
-        ax.grid(True, which="both", color="black", linestyle="-", linewidth=0.5)
+    # Combine channels with a 2-channel color scheme (R=channel_1, G=channel_2)
+    if combine_channels:
+        ground_truth_combined = np.stack(
+            [channel_1_gt, channel_2_gt, np.zeros_like(channel_1_gt)], axis=-1
+        )  # R=channel_1, G=channel_2, B=0
+        predictions_combined = np.stack(
+            [channel_1_pred, channel_2_pred, np.zeros_like(channel_1_pred)], axis=-1
+        )  # R=channel_1, G=channel_2, B=0
+        difference_combined = np.stack(
+            [channel_1_diff, channel_2_diff, np.zeros_like(channel_1_diff)], axis=-1
+        )  # R=channel_1, G=channel_2, B=0
+
+    # Initialize plots
+    if combine_channels:
+        for ax, title in zip(axes, ["Ground Truth", "Prediction", "Difference"]):
+            ax.set_title(title)
+            ax.set_yticks(np.arange(len(row_labels)))
+            ax.set_yticklabels(row_labels, fontsize=12)
+            ax.grid(True, which="both", color="black", linestyle="-", linewidth=0.5)
+
+        ax_gt, ax_pred, ax_diff = axes
+        im_gt = ax_gt.imshow(
+            ground_truth_combined[0, :, :, :],
+            vmin=0,
+            vmax=255,
+            interpolation="nearest",
+            aspect="auto",
+        )
+        im_pred = ax_pred.imshow(
+            predictions_combined[0, :, :, :],
+            vmin=0,
+            vmax=255,
+            interpolation="nearest",
+            aspect="auto",
+        )
+        im_diff = ax_diff.imshow(
+            difference_combined[0, :, :, :],
+            vmin=0,
+            vmax=255,
+            interpolation="nearest",
+            aspect="auto",
+        )
+    else:
+        for i, (data_gt, data_pred, data_diff, ax_row) in enumerate(
+            [
+                (channel_1_gt, channel_1_pred, channel_1_diff, axes[0]),
+                (channel_2_gt, channel_2_pred, channel_2_diff, axes[1]),
+            ]
+        ):
+            for ax, title in zip(
+                ax_row,
+                [
+                    f"Ground Truth - Channel {i+1}",
+                    f"Prediction - Channel {i+1}",
+                    f"Difference - Channel {i+1}",
+                ],
+            ):
+                ax.set_title(title)
+                ax.set_yticks(np.arange(len(row_labels)))
+                ax.set_yticklabels(row_labels, fontsize=12)
+                ax.grid(True, which="both", color="black", linestyle="-", linewidth=0.5)
+
+            ax_gt, ax_pred, ax_diff = ax_row
+            im_gt = ax_gt.imshow(
+                data_gt[0, :, :],
+                cmap="gray",
+                vmin=0,
+                vmax=255,
+                interpolation="nearest",
+                aspect="auto",
+            )
+            im_pred = ax_pred.imshow(
+                data_pred[0, :, :],
+                cmap="gray",
+                vmin=0,
+                vmax=255,
+                interpolation="nearest",
+                aspect="auto",
+            )
+            im_diff = ax_diff.imshow(
+                data_diff[0, :, :],
+                cmap="hot",
+                vmin=0,
+                vmax=255,
+                interpolation="nearest",
+                aspect="auto",
+            )
 
     # Update function for animation
     def update_frame(frame):
-        im_gt.set_array(ground_truth[frame])
-        im_pred.set_array(predictions[frame])
-        im_diff.set_array(difference[frame])
+        if combine_channels:
+            im_gt.set_array(ground_truth_combined[frame, :, :, :])
+            im_pred.set_array(predictions_combined[frame, :, :, :])
+            im_diff.set_array(difference_combined[frame, :, :, :])
+        else:
+            im_gt.set_array(channel_1_gt[frame, :, :])
+            im_pred.set_array(channel_1_pred[frame, :, :])
+            im_diff.set_array(channel_1_diff[frame, :, :])
         return im_gt, im_pred, im_diff
 
     # Create animation

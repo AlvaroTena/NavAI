@@ -56,52 +56,25 @@ rldataset.read_data(
 )
 
 transformed_dataset = rldataset.transform_features()
-obs_min = transformed_dataset.min().values
-obs_max = transformed_dataset.max().values
+obs_min = transformed_dataset.min().values[-len(const.PROCESSED_SATELLITE_LIST) :]
+obs_max = transformed_dataset.max().values[-len(const.PROCESSED_SATELLITE_LIST) :]
 
 
 scaler = StandardScaler()
-standard_data = scaler.fit_transform(
-    transformed_dataset[
-        [
-            "delta_time",
-            "code",
-            "phase",
-            "doppler",
-            "snr",
-            "elevation",
-            "residual",
-            "iono",
-            "delta_cmc",
-            "crc",
-        ]
-    ]
+standarized_data = scaler.fit_transform(
+    transformed_dataset[const.PROCESSED_SATELLITE_LIST]
 )
-transformed_dataset.loc[
-    :,
-    [
-        "delta_time",
-        "code",
-        "phase",
-        "doppler",
-        "snr",
-        "elevation",
-        "residual",
-        "iono",
-        "delta_cmc",
-        "crc",
-    ],
-] = standard_data
+transformed_dataset.loc[:, const.PROCESSED_SATELLITE_LIST] = standarized_data
 
 
 min_values, max_values = (
-    transformed_dataset.min().to_list(),
-    transformed_dataset.max().to_list(),
+    transformed_dataset[const.PROCESSED_SATELLITE_LIST].min().to_list(),
+    transformed_dataset[const.PROCESSED_SATELLITE_LIST].max().to_list(),
 )
 obs_spec = array_spec.BoundedArraySpec(
     shape=(
         pe_const.MAX_SATS * pe_const.NUM_CHANNELS,
-        1 + len(const.PROCESSED_FEATURE_LIST),
+        1 + len(const.PROCESSED_SATELLITE_LIST),
     ),
     dtype=np.float32,
     minimum=np.array([0.0] + min_values),
@@ -110,9 +83,9 @@ obs_spec = array_spec.BoundedArraySpec(
 )
 
 window_size = rldataset.window_size
-height = pe_const.MAX_SATS * pe_const.NUM_CHANNELS
-width = len(const.PROCESSED_FEATURE_LIST)
-channels = 1
+height = pe_const.MAX_SATS
+width = len(const.PROCESSED_SATELLITE_LIST)
+channels = pe_const.NUM_CHANNELS
 factorised_model = vivit.ViViT_Factorised(
     spatial_patch_size=(height // height, width // 1),
     embedding_dim=1024,
@@ -141,12 +114,14 @@ def masked_mse_loss(y_true, y_pred):
     Returns:
         Pérdida MSE promedio considerando solo las posiciones válidas.
     """
-    y_true = tf.squeeze(y_true, axis=-1)
-    y_pred = tf.squeeze(y_pred, axis=-1)
 
     # Extraer la máscara y las características reales
-    mask = y_true[..., 0:1]  # Máscara de atención (Shape: batch_size, T, H, W)
-    y_true = y_true[..., 1:]  # Características reales (Shape: batch_size, T, H, W)
+    mask = tf.expand_dims(
+        y_true[..., 0, :], axis=-2
+    )  # Máscara de atención (Shape: batch_size, T, H, W, C)
+    y_true = y_true[
+        ..., 1:, :
+    ]  # Características reales (Shape: batch_size, T, H, W, C)
 
     # Calcular el error cuadrático medio (MSE)
     mse = tf.square(y_true - y_pred)
@@ -211,8 +186,8 @@ autoencoder.compile(
 )
 
 # Expandir obs_min y obs_max para que tengan la forma adecuada para la operación de broadcasting
-obs_min_exp = np.expand_dims(obs_min, axis=(0, 2))  # De (14,) a (1, 14, 1)
-obs_max_exp = np.expand_dims(obs_max, axis=(0, 2))  # De (14,) a (1, 14, 1)
+obs_min_exp = np.expand_dims(obs_min, axis=(0, 1, 3))
+obs_max_exp = np.expand_dims(obs_max, axis=(0, 1, 3))
 
 
 ground_truth = sample[0]["input_observations"]
@@ -238,8 +213,9 @@ gif_path = vutils.generate_sequence_comparison_gif(
     reverse_scaling=scaler.inverse_transform,
     obs_min=obs_min_exp,
     obs_max=obs_max_exp,
-    row_labels=transformed_dataset.columns.to_list(),
+    row_labels=const.PROCESSED_SATELLITE_LIST,
     save_path="pretrain.gif",
+    combine_channels=True,
 )
 run[f"visualizations/pretrain"].upload(gif_path)
 

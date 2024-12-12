@@ -341,6 +341,29 @@ class ViViT_Factorised:
         return x
 
     def build_decoder(self, latent_representation):
+        def compute_kernel_and_stride(dim):
+            """
+            Computes the kernel size and stride for a dimension based on its prime factors.
+            Args:
+                dim (int): Dimension size (height or width).
+            Returns:
+                list: List of tuples (kernel_size, stride).
+            """
+            from sympy import factorint
+
+            factors = list(factorint(dim).keys())  # Get prime factors
+            strides = []
+            kernel_sizes = []
+            remaining_dim = dim
+
+            for factor in factors:
+                if remaining_dim % factor == 0:
+                    strides.append(factor)
+                    kernel_sizes.append(factor)
+                    remaining_dim //= factor
+
+            return list(zip(kernel_sizes, strides))
+
         # Reconstrucción del video a partir de la representación latente
         batch_size = tf.shape(latent_representation)[0]
         T = self.T
@@ -366,50 +389,40 @@ class ViViT_Factorised:
         # Reestructuramos para aplicar Conv2DTranspose
         x = tf.reshape(x, (batch_size, T, 1, 1, initial_filters))
 
-        # Primera capa: Upsampling a (13, 7)
-        x = tf.keras.layers.TimeDistributed(
-            tf.keras.layers.Conv2DTranspose(
-                filters=initial_filters // 2,
-                kernel_size=(13, 7),
-                strides=(13, 7),
-                padding="valid",
-                activation="gelu",
-            )
-        )(
-            x
-        )  # (batch_size, T, 13, 7, initial_filters // 2)
+        current_height = 1
+        current_width = 1
+        current_filters = initial_filters
 
-        # Segunda capa: Upsampling a (286, 14)
-        x = tf.keras.layers.TimeDistributed(
-            tf.keras.layers.Conv2DTranspose(
-                filters=initial_filters // 4,
-                kernel_size=(22, 2),
-                strides=(22, 2),
-                padding="valid",
-                activation="gelu",
-            )
-        )(
-            x
-        )  # (batch_size, T, 286, 14, initial_filters // 4)
+        height_steps = compute_kernel_and_stride(H // current_height)
+        width_steps = compute_kernel_and_stride(W // current_width)
 
-        # Reducir filtros progresivamente
-        x = tf.keras.layers.TimeDistributed(
-            tf.keras.layers.Conv2D(
-                filters=initial_filters // 8,
-                kernel_size=(3, 3),
-                padding="same",
-                activation="gelu",
-            )
-        )(x)
+        for (h_kernel, h_stride), (w_kernel, w_stride) in zip(
+            height_steps, width_steps
+        ):
+            x = tf.keras.layers.TimeDistributed(
+                tf.keras.layers.Conv2DTranspose(
+                    filters=current_filters // 2,
+                    kernel_size=(h_kernel, w_kernel),
+                    strides=(h_stride, w_stride),
+                    padding="valid",
+                    activation="gelu",
+                )
+            )(x)
+            current_filters //= 2
+            current_height *= h_stride
+            current_width *= w_stride
 
-        x = tf.keras.layers.TimeDistributed(
-            tf.keras.layers.Conv2D(
-                filters=initial_filters // 16,
-                kernel_size=(3, 3),
-                padding="same",
-                activation="gelu",
-            )
-        )(x)
+        # Reducir filtros progresivamente hasta alcanzar el número de canales objetivo
+        while current_filters > C:
+            x = tf.keras.layers.TimeDistributed(
+                tf.keras.layers.Conv2D(
+                    filters=current_filters // 2,
+                    kernel_size=(3, 3),
+                    padding="same",
+                    activation="gelu",
+                )
+            )(x)
+            current_filters //= 2
 
         # Capa de salida
         reconstructed_video = tf.keras.layers.TimeDistributed(
