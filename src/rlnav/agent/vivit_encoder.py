@@ -140,12 +140,20 @@ def masked_mse_loss(y_true, y_pred):
     return masked_mse_mean
 
 
+# Precompute windows
+windows = vutils.prepare_windows(transformed_dataset, window_size)
+
+
+# Create TensorFlow Dataset
 def generator():
     def wrapper_transform(block_data):
         return rldataset.transform_to_observation_spec(block_data, obs_spec)
 
-    return vutils.data_generator(
-        transformed_dataset, (window_size, height, width, channels), wrapper_transform
+    return vutils.generate_tensor_data(
+        transformed_dataset,
+        windows,
+        wrapper_transform,
+        (window_size, height, width, channels),
     )
 
 
@@ -170,9 +178,9 @@ for inputs, output in sample:
 
 
 total_epochs = len(transformed_dataset.index.get_level_values("epoch").unique())
-steps_per_epoch = total_epochs // time_steps
+steps_per_epoch = total_epochs - time_steps + 1
 batch_size = 1
-buffer_size = steps_per_epoch
+buffer_size = steps_per_epoch // 100
 
 dataset = dataset.shuffle(buffer_size=buffer_size, reshuffle_each_iteration=True)
 dataset = dataset.batch(batch_size)
@@ -214,14 +222,14 @@ gif_path = vutils.generate_sequence_comparison_gif(
     obs_min=obs_min_exp,
     obs_max=obs_max_exp,
     row_labels=const.PROCESSED_SATELLITE_LIST,
-    save_path="pretrain.gif",
     combine_channels=True,
+    save_path="pretrain.gif",
 )
 run[f"visualizations/pretrain"].upload(gif_path)
 
 
 # Definir el número de épocas y pasos por época
-num_epochs = 5
+num_epochs = 1
 
 # Entrenar el modelo
 autoencoder.fit(
@@ -232,6 +240,14 @@ autoencoder.fit(
 
 autoencoder.save("models/autoencoder.keras")
 run["autoencoder"].upload("models/autoencoder.keras")
+
+predicted_obs = autoencoder.predict(
+    {
+        "input_observations": input_observations,
+        "attention_mask": attention_mask,
+    }
+)
+
 gif_path = vutils.generate_sequence_comparison_gif(
     ground_truth.numpy(),
     predicted_obs,
@@ -239,7 +255,8 @@ gif_path = vutils.generate_sequence_comparison_gif(
     reverse_scaling=scaler.inverse_transform,
     obs_min=obs_min_exp,
     obs_max=obs_max_exp,
-    row_labels=transformed_dataset.columns.to_list(),
+    row_labels=const.PROCESSED_SATELLITE_LIST,
+    combine_channels=True,
     save_path="trained.gif",
 )
 run[f"visualizations/trained"].upload(gif_path)

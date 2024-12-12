@@ -8,12 +8,82 @@ from matplotlib.animation import FuncAnimation
 import rlnav.types.constants as const
 
 
+def prepare_windows(dataset, window_size):
+    """
+    Precompute sliding windows for a given MultiIndex pandas dataset.
+    """
+    unique_epochs = dataset.index.get_level_values("epoch").unique()
+    total_epochs = len(unique_epochs)
+    windows = [
+        unique_epochs[i : i + window_size]
+        for i in range(total_epochs - window_size + 1)
+    ]
+    return windows
+
+
+def generate_tensor_data(transformed_dataset, windows, transform_fn, data_shape):
+    """
+    Generate tensor data using precomputed windows.
+    """
+    T, H, W, C = data_shape
+
+    for window in windows:
+        block_data = transformed_dataset[
+            transformed_dataset.index.get_level_values("epoch").isin(window)
+        ]
+        obs = transform_fn(block_data)
+
+        # Extract attention mask and features
+        attention_mask = (obs[..., 0]).astype(np.int32)
+        obs = obs[..., 1:]  # Extract features
+
+        # Split channels and reshape
+        obs_channel_1, obs_channel_2 = np.split(obs, C, axis=1)
+        obs = np.concatenate(
+            [
+                np.expand_dims(obs_channel_1, axis=-1),
+                np.expand_dims(obs_channel_2, axis=-1),
+            ],
+            axis=-1,
+        )
+        attention_mask = np.expand_dims(attention_mask, axis=-1)
+        attention_mask_channel_1, attention_mask_channel_2 = np.split(
+            attention_mask, C, axis=1
+        )
+        attention_mask = np.concatenate(
+            [
+                np.expand_dims(attention_mask_channel_1, axis=-1),
+                np.expand_dims(attention_mask_channel_2, axis=-1),
+            ],
+            axis=-1,
+        )
+        attention_mask = np.tile(attention_mask, (1, 1, W, 1))
+
+        y_true = np.concatenate(
+            [np.expand_dims(attention_mask[..., 0, :], axis=-2), obs], axis=-2
+        )
+
+        # Convert to tensors
+        obs_tensor = tf.convert_to_tensor(obs, dtype=tf.float32)
+        attention_mask_tensor = tf.convert_to_tensor(attention_mask, dtype=tf.int32)
+        y_true_tensor = tf.convert_to_tensor(y_true, dtype=tf.float32)
+
+        # Prepare inputs and outputs
+        inputs = {
+            "input_observations": obs_tensor,
+            "attention_mask": attention_mask_tensor,
+        }
+        outputs = y_true_tensor
+
+        yield inputs, outputs
+
+
 def data_generator(dataset, data_shape, transform_fn):
     T, H, W, C = data_shape
     unique_epochs = dataset.index.get_level_values("epoch").unique()
     total_epochs = len(unique_epochs)
 
-    for start_idx in range(0, total_epochs, T):
+    for start_idx in range(0, total_epochs - T + 1):
         end_idx = min(start_idx + T, total_epochs)
         selected_epochs = unique_epochs[start_idx:end_idx]
         block_data = dataset[
