@@ -5,6 +5,7 @@ from typing import Union
 from pewrapper.api import Log_Handle, LogCategoryPE, Signal_Obs, f_handle_bin_ephem_NVM
 from pewrapper.common.cwrapper import C_Enum
 from pewrapper.types import constants
+from pewrapper.types.constants import SECURITY
 
 INPUT_IMU_DATA_BUFFER_SIZE = 25
 INPUT_WHEEL_SPEED_DATA_BUFFER_SIZE = 25
@@ -370,6 +371,10 @@ class PE_Output_str(ct.Structure):
             ("correctionAge", ct.c_double),
             ("timeWithoutSatelliteSignals", ct.c_double),
         ]
+        if SECURITY:
+            _fields_.extend(
+                [("serial_license_valid", ct.c_bool), ("time_license_valid", ct.c_bool)]
+            )
 
         def __init__(self):
             self.SSM_Signal = SafeStateMachineSignal.NO_SOLUTION
@@ -402,6 +407,10 @@ class PE_Output_str(ct.Structure):
             self.SSM_Signal_Vel = SafeStateMachineSignal.NO_SOLUTION
             self.correctionAge = 0.0
             self.timeWithoutSatelliteSignals = 0.0
+
+            if SECURITY:
+                self.serial_license_valid = True
+                self.time_license_valid = True
 
     class PE_imu_odo_out(ct.Structure):
         _fields_ = [
@@ -547,6 +556,8 @@ class Configuration_info(ct.Structure):
         ("log_category", ct.c_uint32),
         ("ReportDTCStatus", f_handle_ReportDTCStatus),
     ]
+    if SECURITY:
+        _fields_.extend([("license_file_path", ct.c_char_p)])
 
     def __init__(
         self,
@@ -608,6 +619,9 @@ class Configuration_info(ct.Structure):
 
         self.tile_hysteresis_delta_km = 20.0
         self.doppler_available = True
+
+        if SECURITY:
+            self.license_file_path = "./".encode("utf-8")
 
         self.max_age_of_corrections = 18000.0
 
