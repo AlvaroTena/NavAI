@@ -26,6 +26,7 @@ from pewrapper.misc import (
     get_pe_api_category,
 )
 from pewrapper.types import GPS_Time
+from pewrapper.types.constants import SECURITY
 
 
 class ConfigurationManager(metaclass=Singleton):
@@ -100,6 +101,17 @@ class ConfigurationManager(metaclass=Singleton):
         pt.read(filename)
 
         returnValue = True
+
+        # if SECURITY:
+        #     # LICENSE PATH
+        #     success, addInfo, self.config_info_.license_file_path = ParseConfiguration(
+        #         self.config_info_.license_file_path,
+        #         pt,
+        #         "Configuration.license_file_path",
+        #         "license_file_path",
+        #         addInfo,
+        #         verbose=verbose,
+        #     )
 
         # CHANNEL CONFIGURATION
         success, addInfo, self.config_info_.Signal_1_GAL = ParseConfiguration(
