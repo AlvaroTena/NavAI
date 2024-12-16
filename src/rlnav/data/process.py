@@ -5,11 +5,10 @@ from typing import Tuple, Union
 
 import numpy as np
 import pandas as pd
-import scipy.constants as sc_const
-from scipy import stats
-
 import rlnav.types.constants as const
+import scipy.constants as sc_const
 from navutils.logger import Logger
+from scipy import stats
 
 
 class DataProcessor:
@@ -126,7 +125,7 @@ class DataProcessor:
         df.sort_index(inplace=True)
 
         self._times["preprocess_batch"].append(time.time() - start)
-        return df[const.PREPROCESSED_FEATURE_LIST]
+        return df[(const.PREPROCESSED_FEATURE_LIST)]
 
     def _preprocess_extract_cons(self, sat_id: pd.Series) -> pd.Series:
         return pd.Categorical(sat_id.str[0], categories=["G", "E", "B"], ordered=False)

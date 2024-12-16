@@ -4,14 +4,14 @@ from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
-
 from navutils.logger import Logger
-from pewrapper.api import (
+from pewrapper.api.pe_api import Position_Engine_API
+from pewrapper.api.pe_api_types import (
     GM_Time,
     IMU_Measurements,
     Input_IMU_Measurements,
     Input_WheelSpeed_Measurements,
-    Position_Engine_API,
+    PE_API_FeaturesAI,
     SafeState,
     SafeStateMachineSignal,
     SensorQualifier,
@@ -19,15 +19,16 @@ from pewrapper.api import (
 )
 from pewrapper.managers import ConfigurationManager, OutputStr, SafetyStateMachine
 from pewrapper.managers.wrapper_data_mgr import WrapperDataManager
-from pewrapper.misc import RELEASE_INFO, GetSensorQualifier, about_msg
+from pewrapper.misc.utils import GetSensorQualifier
+from pewrapper.misc.version_wrapper_bin import RELEASE_INFO, about_msg
 from pewrapper.recorders import Position_Recorder
-from pewrapper.types import (
+from pewrapper.types.common_wrapper import (
     COMPUTE_INPUT_DATA_WITH_TIME,
     COMPUTE_INPUT_DATA_WITH_TIME_DELAY_TAG,
     COMPUTE_INPUT_DATA_WITHOUT_TIME,
-    GPS_Time,
-    PE_output_config,
 )
+from pewrapper.types.gps_time_wrapper import GPS_Time
+from pewrapper.types.wrapper_data import PE_output_config
 
 NUMBER_IMU_MSG_FIELDS = 7
 NUMBER_IMU_MSG_FIELDS_QUALIFIERS = 13
@@ -452,6 +453,7 @@ class Wrapper_Handler(Wrapper):
             f" Launching wrapper file data processing",
         )
 
+        pvt_output = OutputStr()
         pe_output = OutputStr()
         self.state_machine_.reset()
 
@@ -515,7 +517,16 @@ class Wrapper_Handler(Wrapper):
             )
 
         for epoch, wrapper_epoch_data in self.wrapper_file_data_:
+            pvt_output.reset()
             pe_output.reset()
+            epoch = GPS_Time(
+                year=epoch.year,
+                month=epoch.month,
+                day=epoch.day,
+                hour=epoch.hour,
+                minute=epoch.minute,
+                second=epoch.second + (epoch.microsecond / 1e6),
+            )
 
             epoch_str = epoch.calendar_column_str_d()
 
@@ -586,11 +597,12 @@ class Wrapper_Handler(Wrapper):
                             wrapper_epoch_data,
                             imu_buffer,
                             odo_buffer,
+                            pvt_output,
                             pe_output,
                         )
                     )[0]:
                         return False
-                    _, imu_buffer, odo_buffer, pe_output = result
+                    _, imu_buffer, odo_buffer, pvt_output, pe_output = result
 
             if (
                 any(wrapper_epoch_data["msg_type"] == "COMPUTE")
@@ -616,11 +628,12 @@ class Wrapper_Handler(Wrapper):
                         wrapper_epoch_data,
                         imu_buffer,
                         odo_buffer,
+                        pvt_output,
                         pe_output,
                     )
                 )[0]:
                     return False
-                _, imu_buffer, odo_buffer, pe_output = result
+                _, imu_buffer, odo_buffer, pvt_output, pe_output = result
 
         if not self.state_machine_.ProcessSignal(
             SafeStateMachineSignal.TERMINATE_SIGNAL
@@ -643,8 +656,11 @@ class Wrapper_Handler(Wrapper):
         wrapper_epoch_data: pd.DataFrame,
         imu_buffer: List[IMU_Measurements],
         odo_buffer: List[WheelSpeedData],
+        pvt_output: OutputStr,
         pe_output: OutputStr,
     ) -> Tuple[bool, List[IMU_Measurements], List[WheelSpeedData], OutputStr]:
+        featuresMP = PE_API_FeaturesAI()
+
         # Load Sensors Buffers
         if not self._load_buffered_sensors(imu_buffer, odo_buffer):
             return False, imu_buffer, odo_buffer, pe_output
@@ -682,8 +698,16 @@ class Wrapper_Handler(Wrapper):
                 f"Error getting GM_TIME {epoch_str}",
             )
 
+        result_pe, pvt_output.output_PE, featuresMP = self.position_engine_.PreCompute(
+            gm_time,
+            pvt_output.output_PE,
+            featuresMP,
+        )
+
         result_pe, pe_output.output_PE = self.position_engine_.Compute(
-            self.state_machine_.GetCurrentState(), gm_time, pe_output.output_PE
+            self.state_machine_.GetCurrentState(),
+            pvt_output.output_PE,
+            pe_output.output_PE,
         )
         result_pe &= self.state_machine_.ProcessSignal(pe_output)
 
@@ -702,4 +726,4 @@ class Wrapper_Handler(Wrapper):
             is_qm = self.configMgr_.config_info_.use_qm_variant
             self.position_recorder_.write_pos_epoch(epoch, is_qm, pe_output)
 
-        return True, imu_buffer, odo_buffer, pe_output
+        return True, imu_buffer, odo_buffer, pvt_output, pe_output

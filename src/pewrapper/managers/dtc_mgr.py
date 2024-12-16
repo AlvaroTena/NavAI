@@ -1,7 +1,7 @@
 import ctypes as ct
 
 from navutils.logger import Logger
-from pewrapper.api import DTC_ID_List, f_handle_ReportDTCStatus
+from pewrapper.api.pe_api_types import DTC_ID_List, f_handle_ReportDTCStatus
 
 MAX_DTCS = len(DTC_ID_List)
 DTCS_STRING = [

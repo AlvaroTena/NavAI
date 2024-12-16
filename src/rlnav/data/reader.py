@@ -5,7 +5,6 @@ from typing import Union
 import dvc.api
 import numpy as np
 import pandas as pd
-
 from navutils.logger import Logger
 from rlnav.data.process import DataProcessor
 
@@ -83,34 +82,43 @@ class Reader:
             f"Reading {file}",
         )
 
-        in_column_names = Reader.IN_COLUMN_NAMES
-        out_column_names = Reader.OUT_COLUMN_NAMES
+        if file.endswith(".parquet"):
+            return pd.read_parquet(file)
 
-        # Read txt and convert it to pandas dataframe
-        current_data = pd.read_csv(
-            file,
-            sep="\s+",
-            header=0,
-            names=in_column_names,
-            skip_blank_lines=True,
-            skiprows=1,
-            dtype=dict(zip(Reader.IN_COLUMN_NAMES, Reader.IN_COLUMN_TYPES)),
-        )
+        elif file.endswith(".txt"):
+            in_column_names = Reader.IN_COLUMN_NAMES
+            out_column_names = Reader.OUT_COLUMN_NAMES
 
-        # Convert epoch in datetime
-        current_data["epoch"] = pd.to_datetime(
-            current_data[["Year", "Month", "Day", "Hours", "Minutes", "Seconds"]]
-        )
+            # Read txt and convert it to pandas dataframe
+            current_data = pd.read_csv(
+                file,
+                sep="\s+",
+                header=0,
+                names=in_column_names,
+                skip_blank_lines=True,
+                skiprows=1,
+                dtype=dict(zip(Reader.IN_COLUMN_NAMES, Reader.IN_COLUMN_TYPES)),
+            )
 
-        # Remove time columns
-        current_data = current_data.drop(
-            ["Year", "Month", "Day", "Hours", "Minutes", "Seconds"], axis=1
-        )
+            # Convert epoch in datetime
+            current_data["epoch"] = pd.to_datetime(
+                current_data[["Year", "Month", "Day", "Hours", "Minutes", "Seconds"]]
+            )
 
-        # Reorder columns to merge to global dataframe
-        current_data = current_data[out_column_names]
+            # Remove time columns
+            current_data = current_data.drop(
+                ["Year", "Month", "Day", "Hours", "Minutes", "Seconds"], axis=1
+            )
 
-        return current_data
+            # Reorder columns to merge to global dataframe
+            current_data = current_data[out_column_names]
+
+            current_data.to_parquet(file.replace(".txt", ".parquet"))
+
+            return current_data
+
+        else:
+            raise IOError(f"Unsupported file format: {os.path.basename(file)}")
 
     @staticmethod
     def read_and_process(

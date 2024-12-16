@@ -4,29 +4,30 @@ from typing import Tuple
 
 from navutils.logger import Logger
 from navutils.singleton import Singleton
-from pewrapper.api import (
+from pewrapper.api.common_api_types import (
+    Log_Handle,
+    Signal_Obs,
+    f_handle_bin_ephem_NVM,
+)
+from pewrapper.api.pe_api_types import (
     Configuration_info,
     GalCorrectionDataType,
     GNSSProtocol,
-    Log_Handle,
-    Signal_Obs,
     doppler_sign,
-    f_handle_bin_ephem_NVM,
     f_handle_ReportDTCStatus,
-    type_receier,
+    type_receiver,
 )
 from pewrapper.handles import PE_LogWrapper, parse_binEphem
 from pewrapper.managers.dtc_mgr import DtcManager
-from pewrapper.misc import (
+from pewrapper.misc.parser_utils import (
     ConfigDefaultValue,
     ParseBoolConfigurationField,
     ParseConfiguration,
     ParseConfigurationField,
-    deepcopy_config,
-    get_pe_api_category,
 )
-from pewrapper.types import GPS_Time
+from pewrapper.misc.utils import deepcopy_config, get_pe_api_category
 from pewrapper.types.constants import SECURITY
+from pewrapper.types.gps_time_wrapper import GPS_Time
 
 
 class ConfigurationManager(metaclass=Singleton):
@@ -281,7 +282,7 @@ class ConfigurationManager(metaclass=Singleton):
             "Algo profile",
             addInfo,
             True,
-            type_receier.UNKNOWN,
+            type_receiver.UNKNOWN,
             verbose=verbose,
         )
         returnValue = returnValue and success
@@ -453,7 +454,7 @@ class ConfigurationManager(metaclass=Singleton):
 
         if (
             self.config_info_.require_e2e_msg
-            or self.config_info_.algo_profile == type_receier.E_UBLOX_A9
+            or self.config_info_.algo_profile == type_receiver.E_UBLOX_A9
         ):
             (
                 success,
@@ -772,7 +773,7 @@ class ConfigurationManager(metaclass=Singleton):
         if (
             (
                 not self.compute_log_
-                and self.config_info_.algo_profile != type_receier.E_UBLOX_A9
+                and self.config_info_.algo_profile != type_receiver.E_UBLOX_A9
             )
             and self.config_info_.require_timesync
             and self.config_info_.gnssProtocol == GNSSProtocol.UBX

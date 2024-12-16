@@ -6,9 +6,10 @@ neptune:
 
 scenarios:
   path: data/scenarios/
-  n_scenarios: 1
+  n_scenarios: -1
   priority: scenario_931_000_GPSGALBDS_CSIRELAND_L1L2_KINEMATIC_20231003
   skip_first: 0
+  n_generations: 1
 
 processed_data:
   path: data/RLNav/processed/

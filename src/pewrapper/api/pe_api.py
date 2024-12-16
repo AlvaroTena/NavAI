@@ -4,8 +4,7 @@ import sys
 from typing import ByteString, Tuple
 
 from navutils.logger import Logger
-from pewrapper.api import (
-    ApiVersion,
+from pewrapper.api.pe_api_types import (
     Configuration_info,
     Event,
     GM_Time,
@@ -17,6 +16,7 @@ from pewrapper.api import (
     SafeState,
     SafeStateMachineSignal,
 )
+from pewrapper.api.version_pe_api import ApiVersion
 
 
 class Position_Engine_API:
@@ -24,6 +24,11 @@ class Position_Engine_API:
 
     def __init__(self, lib_path=os.getenv("LD_LIBRARY_PATH")):
         try:
+            lib_paths = lib_path.split(":")
+            for path in lib_paths:
+                if os.path.exists(os.path.join(path, "libcommon_lib_PE_develop.so")):
+                    lib_path = path
+                    break
             self.common_lib = ct.CDLL(
                 os.path.join(lib_path, "libcommon_lib_PE_develop.so")
             )

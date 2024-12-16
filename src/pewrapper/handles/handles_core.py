@@ -3,7 +3,7 @@ import os
 from typing import ByteString
 
 from navutils.logger import Logger
-from pewrapper.api import (
+from pewrapper.api.common_api_types import (
     SIZE_BINEPHEM,
     Log_Handle,
     LogCategoryPE,

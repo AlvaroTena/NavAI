@@ -7,13 +7,12 @@ import neptune
 import numpy as np
 import pandas as pd
 import pyproj
-from geopy.point import Point
-
 import rlnav.types.constants as const
+from geopy.point import Point
 from navutils.logger import Logger
-from pewrapper.api import Latitude_Direction, Longitude_Direction
+from pewrapper.api.pe_api_types import Latitude_Direction, Longitude_Direction
 from pewrapper.managers import OutputStr
-from pewrapper.types import GPS_Time
+from pewrapper.types.gps_time_wrapper import GPS_Time
 from rlnav.managers.reference_datamanager import ReferenceDataManager, ReferenceMode
 from rlnav.recorder.reward_recorder import RewardRecorder
 from rlnav.types.reference_types import ReferenceMode, ReferenceType

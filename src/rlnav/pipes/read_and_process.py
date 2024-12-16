@@ -5,12 +5,11 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 
 import neptune
-from neptune.utils import stringify_unsupported
-
 from navutils.config import load_config
 from navutils.logger import Logger
+from neptune.utils import stringify_unsupported
 from pewrapper.managers import ConfigurationManager
-from pewrapper.misc import parse_session_file
+from pewrapper.misc.parser_utils import parse_session_file
 from rlnav.data.reader import Reader
 
 
@@ -90,18 +89,18 @@ if __name__ == "__main__":
 
         run["raw_data/metadata"].track_files(scen)
 
-        session_file = glob.glob(scen + "CONFIG/session_ai_qm.txt")[0]
+        session_file = glob.glob(scen + "CONFIG/session.ini")[0]
         result = parse_session_file(session_file, verbose=False)
         config_file = result[1] if result[0] else None
 
         config_parsed = configMgr.parse_config_file(config_file, verbose=False)[0]
 
         scenario_info = {
-            "scen_dir": scen.replace(base_config.scenarios.path, "."),
-            "session": session_file.replace(base_config.scenarios.path, "."),
-            "config": config_file.replace(base_config.scenarios.path, "."),
+            "scen_dir": scen.replace(base_config.scenarios.path, "./"),
+            "session": session_file.replace(base_config.scenarios.path, "./"),
+            "config": config_file.replace(base_config.scenarios.path, "./"),
             "dataset": glob.glob(scen + "**/AI_Multipath_*", recursive=True)[0].replace(
-                base_config.scenarios.path, "."
+                base_config.scenarios.path, "./"
             ),
             "config_signals": [
                 [

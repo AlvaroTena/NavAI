@@ -4,17 +4,16 @@ import time
 
 import numpy as np
 import pandas as pd
-from tf_agents.environments import py_environment
-from tf_agents.specs import array_spec
-from tf_agents.trajectories import time_step as ts
-
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
 from navutils.logger import Logger
-from pewrapper.types import GPS_Time
+from pewrapper.types.gps_time_wrapper import GPS_Time
 from rlnav.data.dataset import RLDataset
 from rlnav.managers.reward_mgr import RewardManager
 from rlnav.managers.wrapper_mgr import WrapperManager
+from tf_agents.environments import py_environment
+from tf_agents.specs import array_spec
+from tf_agents.trajectories import time_step as ts
 
 ELEV_THRES = 30
 MIN_ELEV = 5
