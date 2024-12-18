@@ -1,5 +1,4 @@
 import pandas as pd
-
 from navutils.logger import Logger
 from navutils.singleton import Singleton
 from rlnav.types.reference_types import SPAN_COLUMNS, ReferenceMode, ReferenceType
@@ -93,31 +92,41 @@ class ReferenceDataManager(metaclass=Singleton):
                 f"Parsing SPAN file: {filename}",
             )
 
-            df_span = pd.read_csv(
-                filename,
-                comment="#",
-                skipfooter=54,
-                sep="\s+",
-                header=None,
-                index_col=False,
-                names=SPAN_COLUMNS,
-                engine="python",
-            )
+            if filename.endswith(".parquet"):
+                self.reference = pd.read_parquet(filename)
 
-            if df_span.empty:
+            elif filename.endswith(".txt"):
+                df_span = pd.read_csv(
+                    filename,
+                    comment="#",
+                    skipfooter=54,
+                    sep="\s+",
+                    header=None,
+                    index_col=False,
+                    names=SPAN_COLUMNS,
+                    engine="python",
+                )
+
+                df_span["Epoch"] = pd.to_datetime(
+                    df_span["LocalDate"].astype(str)
+                    + " "
+                    + df_span["GPSTime"].astype(str),
+                    format="%Y/%m/%d %H:%M:%S.%f",
+                )
+
+                self.reference = df_span.drop(["LocalDate", "GPSTime"], axis=1)
+                self.reference.to_parquet(filename.replace(".txt", ".parquet"))
+
+            else:
+                raise IOError(f"Unsupported file format: {filename}")
+
+            if self.reference.empty:
                 Logger.log_message(
                     Logger.Category.ERROR,
                     Logger.Module.READER,
                     f"The SPAN_FILE ({filename}) is empty",
                 )
                 raise "SPAN_FILE bad formed"
-
-            df_span["Epoch"] = pd.to_datetime(
-                df_span["LocalDate"].astype(str) + " " + df_span["GPSTime"].astype(str),
-                format="%Y/%m/%d %H:%M:%S.%f",
-            )
-
-            self.reference = df_span.drop(["LocalDate", "GPSTime"], axis=1)
 
         else:
             Logger.log_message(

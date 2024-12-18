@@ -4,11 +4,10 @@ from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
-
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
 from navutils.logger import Logger
-from pewrapper.api import (
+from pewrapper.api.pe_api_types import (
     GM_Time,
     IMU_Measurements,
     PE_API_FeaturesAI,
@@ -22,8 +21,8 @@ from pewrapper.api import (
 )
 from pewrapper.managers import ConfigurationManager, OutputStr
 from pewrapper.managers.wrapper_data_mgr import WrapperDataManager
-from pewrapper.misc import RELEASE_INFO, about_msg
-from pewrapper.types import GPS_Time
+from pewrapper.misc.version_wrapper_bin import RELEASE_INFO, about_msg
+from pewrapper.types.gps_time_wrapper import GPS_Time
 from pewrapper.wrapper_handler import Wrapper
 from rlnav.data.reader import Reader
 from rlnav.managers.reward_mgr import RewardManager

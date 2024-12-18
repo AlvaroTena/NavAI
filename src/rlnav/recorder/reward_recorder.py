@@ -2,7 +2,7 @@ import csv
 import os
 
 from navutils.logger import Logger
-from pewrapper.types import GPS_Time
+from pewrapper.types.gps_time_wrapper import GPS_Time
 
 
 class RewardRecorder:

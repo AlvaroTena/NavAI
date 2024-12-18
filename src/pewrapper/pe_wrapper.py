@@ -6,7 +6,8 @@ import sys
 
 from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
-from pewrapper.misc import RELEASE_INFO, parse_session_file
+from pewrapper.misc.parser_utils import parse_session_file
+from pewrapper.misc.version_wrapper_bin import RELEASE_INFO
 from pewrapper.wrapper_handler import Wrapper_Handler
 
 EXIT_SUCCESS = 0
@@ -95,7 +96,7 @@ def main(argv):
 
     # Session Config file
     session_pe_file_path = args.session_file_path
-    session_file_destination = os.path.join(output_path, "session_output_PE.txt")
+    session_file_destination = os.path.join(output_path, "session.ini")
     if os.path.isfile(session_pe_file_path):
         shutil.copyfile(session_pe_file_path, session_file_destination)
     else:
@@ -107,7 +108,7 @@ def main(argv):
 
     # Wrapper Config file
     wrapper_config_file_path = config_file_path
-    wrapper_config_file_destination = os.path.join(output_path, "wrapper_config.txt")
+    wrapper_config_file_destination = os.path.join(output_path, "wrapper_config.ini")
     if os.path.isfile(wrapper_config_file_path):
         shutil.copyfile(wrapper_config_file_path, wrapper_config_file_destination)
     else:
@@ -119,7 +120,7 @@ def main(argv):
 
     # Tracing config file
     wrapper_tracing_file_path = tracing_config_file
-    wrapper_tracing_file_destination = os.path.join(output_path, "tracing_config.txt")
+    wrapper_tracing_file_destination = os.path.join(output_path, "tracing_config.ini")
     if os.path.isfile(wrapper_tracing_file_path):
         shutil.copyfile(wrapper_tracing_file_path, wrapper_tracing_file_destination)
     else:

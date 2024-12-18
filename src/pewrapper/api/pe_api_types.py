@@ -2,9 +2,13 @@ import ctypes as ct
 import math
 from typing import Union
 
-from pewrapper.api import Log_Handle, LogCategoryPE, Signal_Obs, f_handle_bin_ephem_NVM
+from pewrapper.api.common_api_types import (
+    Log_Handle,
+    LogCategoryPE,
+    Signal_Obs,
+    f_handle_bin_ephem_NVM,
+)
 from pewrapper.common.cwrapper import C_Enum
-from pewrapper.types import constants
 from pewrapper.types.constants import SECURITY
 
 INPUT_IMU_DATA_BUFFER_SIZE = 25
@@ -452,7 +456,7 @@ class PE_Output_str(ct.Structure):
         self.pe_imu_odo_out = PE_Output_str.PE_imu_odo_out()
 
 
-class type_receier(C_Enum):
+class type_receiver(C_Enum):
     E_TESEO = 0
     E_UBLOX = 1
     E_UBLOX_A9 = 2
@@ -557,7 +561,7 @@ class Configuration_info(ct.Structure):
         ("ReportDTCStatus", f_handle_ReportDTCStatus),
     ]
     if SECURITY:
-        _fields_.extend([("license_file_path", ct.c_char_p)])
+        _fields_.insert(38, ("license_file_path", ct.c_char_p))
 
     def __init__(
         self,
@@ -572,7 +576,7 @@ class Configuration_info(ct.Structure):
         self.log_path = "./".encode("utf-8")
         self.tracing_config_file = "./".encode("utf-8")
 
-        self.algo_profile = ct.c_uint32(type_receier.E_TESEO)
+        self.algo_profile = ct.c_uint32(type_receiver.E_TESEO)
         self.doppler_sign = ct.c_uint32(doppler_sign.UNKNOWN_SIGN)
 
         self.use_velCore = True
@@ -633,6 +637,8 @@ class Configuration_info(ct.Structure):
 
 Input_IMU_Measurements = IMU_Measurements * INPUT_IMU_DATA_BUFFER_SIZE
 Input_WheelSpeed_Measurements = WheelSpeedData * INPUT_WHEEL_SPEED_DATA_BUFFER_SIZE
+
+import pewrapper.types.constants as constants
 
 
 class PE_FeaturesMultipathAI(ct.Structure):

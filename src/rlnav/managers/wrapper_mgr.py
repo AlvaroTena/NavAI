@@ -5,13 +5,13 @@ import shutil
 import time
 
 import numpy as np
-from neptune import Run
-
+import pewrapper.misc.parser_utils as parser_utils
 from navutils.logger import Logger
-from pewrapper.api import Log_Handle, LogCategoryPE
+from neptune import Run
+from pewrapper.api.common_api_types import Log_Handle, LogCategoryPE
 from pewrapper.managers import configuration_mgr, wrapper_data_mgr
-from pewrapper.misc import RELEASE_INFO, about_msg, parser_utils
-from pewrapper.types import GPS_Time
+from pewrapper.misc.version_wrapper_bin import RELEASE_INFO, about_msg
+from pewrapper.types.gps_time_wrapper import GPS_Time
 from rlnav.env.wrapper import RLWrapper
 from rlnav.managers import reward_mgr
 from rlnav.recorder.reward_recorder import RewardRecorder
@@ -174,10 +174,10 @@ class WrapperManager:
             scenario_path = os.path.join(self.scenarios_path, self.scenario)
 
             config_path = os.path.join(scenario_path, "CONFIG")
-            session_path = os.path.join(config_path, "session_ai_qm.txt")
-            scenario_info_path = os.path.join(scenario_path, "scenario.txt")
+            session_path = os.path.join(config_path, "session.ini")
+            scenario_info_path = os.path.join(scenario_path, "scenario.ini")
             reference_file_path = os.path.join(
-                scenario_path, "INPUTS/references/kinematic_reference.txt"
+                scenario_path, "INPUTS/REF/kinematic_reference.parquet"
             )
 
             if (dir_error := not os.path.isdir(config_path)) or not os.path.isfile(
@@ -343,7 +343,7 @@ class WrapperManager:
             os.makedirs(output_path, exist_ok=True)
 
         # Session Config file
-        session_file_destination = os.path.join(output_path, "session_output_PE.txt")
+        session_file_destination = os.path.join(output_path, "session.ini")
         if os.path.isfile(session_pe_file_path):
             shutil.copyfile(session_pe_file_path, session_file_destination)
         else:
@@ -355,7 +355,7 @@ class WrapperManager:
 
         # Wrapper Config file
         wrapper_config_file_destination = os.path.join(
-            output_path, "wrapper_config.txt"
+            output_path, "wrapper_config.ini"
         )
         if os.path.isfile(wrapper_config_file_path):
             shutil.copyfile(wrapper_config_file_path, wrapper_config_file_destination)
@@ -368,7 +368,7 @@ class WrapperManager:
 
         # Tracing config file
         wrapper_tracing_file_destination = os.path.join(
-            output_path, "tracing_config.txt"
+            output_path, "tracing_config.ini"
         )
         if os.path.isfile(wrapper_tracing_file_path):
             shutil.copyfile(wrapper_tracing_file_path, wrapper_tracing_file_destination)

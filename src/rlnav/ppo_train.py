@@ -7,17 +7,11 @@ import warnings
 
 import neptune
 import numpy as np
-from neptune_tensorboard import enable_tensorboard_logging
-from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import tf_py_environment
-from tf_agents.policies import policy_saver
-from tf_agents.replay_buffers import tf_uniform_replay_buffer
-from tf_agents.utils import common
-
 from navutils.config import load_config
 from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
-from pewrapper.misc import RELEASE_INFO
+from neptune_tensorboard import enable_tensorboard_logging
+from pewrapper.misc.version_wrapper_bin import RELEASE_INFO
 from rlnav.agent.ppo_agent import create_ppo_agent
 from rlnav.env.pe_env import PE_Env
 from rlnav.env.wrapper import WrapperDataAttributeError
@@ -25,6 +19,11 @@ from rlnav.managers.reward_mgr import RewardManager
 from rlnav.managers.wrapper_mgr import WrapperManager
 from rlnav.recorder.training_recorder import TrainingRecorder
 from rlnav.types.running_metric import RunningMetric
+from tf_agents.drivers import dynamic_step_driver
+from tf_agents.environments import tf_py_environment
+from tf_agents.policies import policy_saver
+from tf_agents.replay_buffers import tf_uniform_replay_buffer
+from tf_agents.utils import common
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 

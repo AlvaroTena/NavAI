@@ -2,12 +2,11 @@ import os
 
 import dill as pickle
 import pandas as pd
+from navutils.logger import Logger
 from neptune import Run
 from neptune.utils import stringify_unsupported
-from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
-
-from navutils.logger import Logger
 from rlnav.data.process import DataProcessor
+from sklearn.preprocessing import StandardScaler
 
 
 class ColumnTransformer:
@@ -108,16 +107,16 @@ def read_and_transform(input_path, output_dir, npt_run: Run):
         )
 
     columns2Transforms = [
-        ("delta_time", MinMaxScaler()),
+        ("delta_time", StandardScaler()),
         ("code", StandardScaler()),
         ("phase", StandardScaler()),
-        ("doppler", MinMaxScaler()),
-        ("snr", MinMaxScaler()),
-        ("elevation", MinMaxScaler()),
-        ("residual", RobustScaler()),
-        ("iono", RobustScaler()),
-        ("delta_cmc", RobustScaler()),
-        ("crc", MinMaxScaler()),
+        ("doppler", StandardScaler()),
+        ("snr", StandardScaler()),
+        ("elevation", StandardScaler()),
+        ("residual", StandardScaler()),
+        ("iono", StandardScaler()),
+        ("delta_cmc", StandardScaler()),
+        ("crc", StandardScaler()),
     ]
     npt_run["data_transformers/columns"] = stringify_unsupported(columns2Transforms)
 

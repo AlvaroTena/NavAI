@@ -1,15 +1,15 @@
 from typing import Union
 
 from navutils.logger import Logger
-from pewrapper.api import (
+from pewrapper.api.pe_api import Position_Engine_API
+from pewrapper.api.pe_api_types import (
     Configuration_info,
     PE_Output_str,
-    Position_Engine_API,
     SafeState,
     SafeStateMachineSignal,
     SystemStatus,
 )
-from pewrapper.types import GPS_Time
+from pewrapper.types.gps_time_wrapper import GPS_Time
 
 
 class OutputStr:

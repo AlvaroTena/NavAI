@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 from typing import Dict
 
-from pewrapper.misc import getFloor, getInt
+from pewrapper.misc.conversion_functions_wrapper import getFloor, getInt
 
 COMP_THRES = 1e-6
 

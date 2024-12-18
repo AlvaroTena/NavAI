@@ -3,11 +3,10 @@ from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
-
 from navutils.logger import Logger
 from navutils.singleton import Singleton
 from pewrapper.managers import ConfigurationManager
-from pewrapper.types import GPS_Time
+from pewrapper.types.gps_time_wrapper import GPS_Time
 
 
 class WrapperDataManager(metaclass=Singleton):
@@ -36,18 +35,31 @@ class WrapperDataManager(metaclass=Singleton):
         )
 
         try:
-            df = pd.read_csv(
-                filename,
-                header=None,
-                comment="#",
-                sep="\r\n",
-                names=["line"],
-                engine="python",
-                dtype=str,
+            if filename.endswith(".parquet"):
+                df = pd.read_parquet(filename)
+                is_parquet = True
+
+            elif filename.endswith(".txt"):
+                df = pd.read_csv(
+                    filename,
+                    header=None,
+                    comment="#",
+                    sep="\r\n",
+                    names=["line"],
+                    engine="python",
+                    dtype=str,
+                )
+                is_parquet = False
+
+            else:
+                raise IOError(f"Unsupported file format: {filename}")
+
+            df, addInfo = self._parse_wrapper_checks(
+                df, self.configMgr_.compute_log_, is_parquet
             )
+
             wrapper_lines = len(df)
 
-            df, addInfo = self._parse_wrapper_checks(df, self.configMgr_.compute_log_)
             for addInfo_line in addInfo:
                 Logger.log_message(
                     Logger.Category.WARNING,
@@ -121,21 +133,27 @@ class WrapperDataManager(metaclass=Singleton):
         return result, addInfo
 
     def _parse_wrapper_checks(
-        self, df: pd.DataFrame, compute_log: bool
+        self, df: pd.DataFrame, compute_log: bool, is_parquet: bool = False
     ) -> Tuple[pd.DataFrame, List[str]]:
         addInfo = []
-
-        df["split_vector"] = df["line"].apply(lambda x: re.split(r"\s+", x.strip()))
-        df["n_fields"] = df["split_vector"].apply(len)
 
         N_VALID_FIELDS = 4
         N_VALID_FIELDS_COMPUTE = 5
         N_VALID_FIELDS_COMPUTE_OTH = 6
 
-        df["valid_n_fields"] = df["n_fields"] >= N_VALID_FIELDS
-        df.loc[df["valid_n_fields"], "msg_type"] = df.loc[
-            df["valid_n_fields"], "split_vector"
-        ].apply(lambda x: x[2] if len(x) > 2 else "")
+        if not is_parquet:
+            df["split_vector"] = df["line"].apply(lambda x: re.split(r"\s+", x.strip()))
+            df["n_fields"] = df["split_vector"].apply(len)
+
+            df["valid_n_fields"] = df["n_fields"] >= N_VALID_FIELDS
+            df.loc[df["valid_n_fields"], "msg_type"] = df.loc[
+                df["valid_n_fields"], "split_vector"
+            ].apply(lambda x: x[2] if len(x) > 2 else "")
+
+        else:
+            # count epoch as 2 fields (date and time) plus 1 for message type
+            df["n_fields"] = 3 + df["message"].str.split(r"\s+").str.len()
+            df.rename(columns={"type": "msg_type"}, inplace=True)
 
         valid_n_fields_mask = (df["n_fields"] == N_VALID_FIELDS) | (
             df["n_fields"].isin([N_VALID_FIELDS_COMPUTE, N_VALID_FIELDS_COMPUTE_OTH])
@@ -145,55 +163,77 @@ class WrapperDataManager(metaclass=Singleton):
             df.loc[~valid_n_fields_mask]
             .apply(
                 lambda row: (
-                    f"Number of fields in record incorrect: {len(row['split_vector'])} vs {N_VALID_FIELDS} (or {N_VALID_FIELDS_COMPUTE} in COMPUTE line)",
+                    f"Number of fields in record incorrect: {row['n_fields']} vs {N_VALID_FIELDS} (or {N_VALID_FIELDS_COMPUTE} in COMPUTE line)",
                     row.name + 1,
-                    row["line"],
+                    row["line"] if not is_parquet else row["message"],
                 ),
                 axis=1,
                 result_type="reduce",
             )
             .tolist()
         )
+
         df = df[valid_n_fields_mask]
-
-        df["msg_data"] = df["split_vector"].apply(lambda x: x[3])
-
         compute_mask = df["n_fields"] == N_VALID_FIELDS_COMPUTE
         compute_oth_mask = df["n_fields"] == N_VALID_FIELDS_COMPUTE_OTH
 
-        df.loc[compute_mask, "msg_data"] += "   " + df.loc[
-            compute_mask, "split_vector"
-        ].apply(lambda x: x[4])
-        df.loc[compute_oth_mask, "msg_data"] += "   " + df.loc[
-            compute_oth_mask, "split_vector"
-        ].apply(lambda x: x[4] + "   " + x[5])
-        df["msg_data"] = df["msg_data"].str.upper()
-        df["msg_data"] = df["msg_data"].str.strip()
+        if not is_parquet:
+            df["msg_data"] = df["split_vector"].apply(lambda x: x[3])
 
-        # Extraer fecha y hora de split_vector
-        df["date"] = df["split_vector"].apply(lambda x: x[0])
-        df["time"] = df["split_vector"].apply(lambda x: x[1])
+            df.loc[compute_mask, "msg_data"] += "   " + df.loc[
+                compute_mask, "split_vector"
+            ].apply(lambda x: x[4])
+            df.loc[compute_oth_mask, "msg_data"] += "   " + df.loc[
+                compute_oth_mask, "split_vector"
+            ].apply(lambda x: x[4] + "   " + x[5])
 
-        # Convertir fecha y hora a datetime y manejar errores
-        df["epoch"] = pd.to_datetime(
-            df["date"] + " " + df["time"],
-            format="%Y/%m/%d %H:%M:%S.%f",
-            errors="coerce",
-        )
-        invalid_epoch_mask = df["epoch"].isnull()
-        addInfo.extend(
-            df.loc[invalid_epoch_mask, "split_vector"]
-            .apply(
-                lambda row: (
-                    f"Record timestamp bad formed. Date: {row['split_vector'][0]}. Time: {row['split_vector'][1]}",
-                    row.name + 1,
-                    row["line"],
-                ),
-                axis=1,
-                result_type="reduce",
+            df["msg_data"] = df["msg_data"].str.upper()
+            df["msg_data"] = df["msg_data"].str.strip()
+
+            # Extraer fecha y hora de split_vector
+            df["date"] = df["split_vector"].apply(lambda x: x[0])
+            df["time"] = df["split_vector"].apply(lambda x: x[1])
+
+            # Convertir fecha y hora a datetime y manejar errores
+            df["epoch"] = pd.to_datetime(
+                df["date"] + " " + df["time"],
+                format="%Y/%m/%d %H:%M:%S.%f",
+                errors="coerce",
             )
-            .tolist()
-        )
+
+            invalid_epoch_mask = df["epoch"].isnull()
+            addInfo.extend(
+                df.loc[invalid_epoch_mask, "split_vector"]
+                .apply(
+                    lambda row: (
+                        f"Record timestamp bad formed. Date: {row['split_vector'][0]}. Time: {row['split_vector'][1]}",
+                        row.name + 1,
+                        row["line"],
+                    ),
+                    axis=1,
+                    result_type="reduce",
+                )
+                .tolist()
+            )
+
+        else:
+            df.rename(columns={"message": "msg_data"}, inplace=True)
+
+            invalid_epoch_mask = df["epoch"].isnull()
+            addInfo.extend(
+                df.loc[invalid_epoch_mask, "epoch"]
+                .apply(
+                    lambda row: (
+                        f"Record timestamp bad formed. Epoch: {row['epoch']}",
+                        row.name + 1,
+                        row["epoch"],
+                    ),
+                    axis=1,
+                    result_type="reduce",
+                )
+                .tolist()
+            )
+
         df = df[~invalid_epoch_mask]
 
         if compute_log:
@@ -210,6 +250,7 @@ class WrapperDataManager(metaclass=Singleton):
             valid_msg_types = ["CS", "GNSS", "IMU", "ODOMETER", "CP"]
 
         invalid_msg_type_mask = ~df["msg_type"].isin(valid_msg_types)
+
         df = df[~invalid_msg_type_mask]
 
         bytes_msg_types = ~df["msg_type"].isin(
@@ -222,7 +263,7 @@ class WrapperDataManager(metaclass=Singleton):
                 lambda row: (
                     f"Message length ({len(row['msg_data'])}) does not match an integer number of bytes",
                     row.name + 1,
-                    row["line"],
+                    row["line"] if not is_parquet else row["msg_data"],
                 ),
                 axis=1,
                 result_type="reduce",
@@ -241,7 +282,7 @@ class WrapperDataManager(metaclass=Singleton):
                 lambda row: (
                     f"Message content bad formed, wrong hex format (msg: {row['msg_data']})",
                     row.name + 1,
-                    row["line"],
+                    row["line"] if not is_parquet else row["msg_data"],
                 ),
                 axis=1,
                 result_type="reduce",

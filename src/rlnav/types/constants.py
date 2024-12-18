@@ -1,4 +1,4 @@
-import pewrapper.api as PE_API
+import pewrapper.api.pe_api_types as PE_API
 
 SENTINEL_VALUE = -99999
 

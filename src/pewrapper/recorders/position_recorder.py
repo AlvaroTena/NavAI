@@ -3,7 +3,7 @@ import os
 from typing import List
 
 from navutils.logger import Logger
-from pewrapper.api import (
+from pewrapper.api.pe_api_types import (
     Latitude_Direction,
     Longitude_Direction,
     NominalState,
@@ -11,14 +11,9 @@ from pewrapper.api import (
     UsedSatellites,
 )
 from pewrapper.managers import OutputStr
-from pewrapper.misc import convert_deg_to_int_min_sec
-from pewrapper.types import (
-    COMPUTE_INPUT_DATA_WITH_TIME,
-    COMPUTE_INPUT_DATA_WITH_TIME_DELAY_TAG,
-    COMPUTE_INPUT_DATA_WITHOUT_TIME,
-    SPEED_OF_LIGHT,
-    GPS_Time,
-)
+from pewrapper.misc.conversion_functions_wrapper import convert_deg_to_int_min_sec
+from pewrapper.types.common_wrapper import SPEED_OF_LIGHT
+from pewrapper.types.gps_time_wrapper import GPS_Time
 
 
 class Position_Recorder:

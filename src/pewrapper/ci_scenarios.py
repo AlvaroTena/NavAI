@@ -13,7 +13,7 @@ scenarios = sorted(
     ]
 )
 
-sessions_path = [os.path.join(scen, "CONFIG/session_ai_qm.txt") for scen in scenarios]
+sessions_path = [os.path.join(scen, "CONFIG/session.ini") for scen in scenarios]
 outputs_path = [os.path.join(scen, "out/") for scen in scenarios]
 
 
@@ -21,7 +21,7 @@ def process_scenario_wrapper(args):
     scen, session, output = args
 
     print(f"Launched {scen}...", flush=True)
-    cmd = f"python3 src/PE_Wrapper/PE_Wrapper.py -s {session} -o {output} -g ERROR"
+    cmd = f"python3 src/pewrapper/pe_wrapper.py -s {session} -o {output} -g ERROR"
     result = subprocess.run(cmd, shell=True, cwd=os.getcwd())
 
     if result.returncode == 0:

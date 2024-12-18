@@ -4,9 +4,9 @@ from configparser import ConfigParser, NoOptionError, NoSectionError, ParsingErr
 from enum import Enum
 from typing import Any, Tuple
 
+import pewrapper.misc.utils as utils
 from navutils.logger import Logger
-from pewrapper.misc.utils import get_id
-from pewrapper.types import GPS_Time
+from pewrapper.types.gps_time_wrapper import GPS_Time
 from rlnav.types.reference_types import ReferenceMode, ReferenceType
 
 
@@ -226,7 +226,7 @@ def ParseConfiguration(
 ) -> Tuple[bool, str, str]:
     try:
         section, option = field.split(".", 1)
-        value = get_id(type(invalid_value)(value), pt.get(section, option))
+        value = utils.get_id(type(invalid_value)(value), pt.get(section, option))
     except (NoSectionError, NoOptionError):
         if is_default:
             value = ct.c_uint32(default_value)
@@ -252,7 +252,7 @@ def ParseConfiguration(
         Logger.log_message(
             Logger.Category.DEBUG,
             Logger.Module.READER,
-            f" Configuration: {label}  set to {get_id(type(invalid_value)(value.value))}",
+            f" Configuration: {label}  set to {utils.get_id(type(invalid_value)(value.value))}",
         )
 
     return True, addInfo, value

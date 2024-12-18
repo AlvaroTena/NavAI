@@ -1,6 +1,6 @@
 outs:
-- md5: a192f31a5a3082860e5ba7bc64ab6800.dir
-  size: 131066917
+- md5: cf85a0c0c3e1e6dcd68b6c9dc1f6ffae.dir
+  size: 134589200
   nfiles: 6
   hash: md5
   path: scenario_917_000_CS_KINEMATIC_20230525_URBAN
