@@ -1,0 +1,5 @@
+outs:
+- md5: 54784c53db5271344cc2b6aeb1f56dce
+  size: 52004316
+  hash: md5
+  path: AI_Multipath_20230928_093845.parquet
