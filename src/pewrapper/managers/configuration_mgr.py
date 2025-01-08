@@ -84,6 +84,9 @@ class ConfigurationManager(metaclass=Singleton):
             ),
         )
 
+    def reset_log_path(self, log_path: str):
+        self.config_info_.log_path = log_path.encode("utf-8")
+
     def parse_config_file(self, filename: str, verbose=True) -> Tuple[bool, str]:
         addInfo = ""
 

@@ -1,5 +1,6 @@
 import ctypes as ct
 import os
+import re
 from configparser import ConfigParser, NoOptionError, NoSectionError, ParsingError
 from enum import Enum
 from typing import Any, Tuple
@@ -150,6 +151,90 @@ def parse_session_file(
     )
 
 
+def write_session_file(
+    filename_src: str, filename_dst: str, change_session_epochs=None, verbose=True
+) -> bool:
+    if not os.path.isfile(filename_src):
+        if verbose:
+            Logger.log_message(
+                Logger.Category.ERROR,
+                Logger.Module.WRITER,
+                f"[write_session_file] File not found: {filename_src}",
+            )
+        return False
+
+    pt = ConfigParser()
+    pt.read(filename_src)
+
+    if change_session_epochs is not None and change_session_epochs:
+        for section in ["InitialEpoch", "FinalEpoch"]:
+            epoch = change_session_epochs[section].calendar_column_str_d()
+            year, month, day, hour, minute, second = re.sub(" +", " ", epoch).split(" ")
+            pt.set(section, "year", f"{int(year):04d}")
+            pt.set(section, "month", f"{int(month):02d}")
+            pt.set(section, "day", f"{int(day):02d}")
+            pt.set(section, "hour", f"{int(hour):02d}")
+            pt.set(section, "minute", f"{int(minute):02d}")
+            pt.set(section, "second", f"{int(second.split('.')[0]):02d}")
+
+    pt.write(open(filename_dst, "w"), space_around_delimiters=False)
+
+    if verbose:
+        Logger.log_message(
+            Logger.Category.DEBUG,
+            Logger.Module.MAIN,
+            f"Session file written: {filename_dst}",
+        )
+
+    return True
+
+
+def parse_subsessions_file(filename: str, subscenario: str, verbose=True) -> dict:
+    subsessions_dict = {}
+
+    if not os.path.isfile(filename):
+        if verbose:
+            Logger.log_message(
+                Logger.Category.ERROR,
+                Logger.Module.MAIN,
+                f"[parse_subsessions_file] File not found: {filename}",
+            )
+        return subsessions_dict
+
+    pt = ConfigParser()
+    pt.read(filename)
+
+    if verbose:
+        Logger.log_message(
+            Logger.Category.DEBUG,
+            Logger.Module.READER,
+            f"Loaded subsection: {subscenario}",
+        )
+
+    if subscenario in pt.sections():
+        success_initial, initial_epoch = _parse_subsession_epoch(
+            pt, subscenario, prefix="initial", verbose=verbose
+        )
+        success_final, final_epoch = _parse_subsession_epoch(
+            pt, subscenario, prefix="final", verbose=verbose
+        )
+
+        if success_initial and success_final:
+            subsessions_dict = {
+                "InitialEpoch": initial_epoch,
+                "FinalEpoch": final_epoch,
+            }
+        else:
+            if verbose:
+                Logger.log_message(
+                    Logger.Category.WARNING,
+                    Logger.Module.MAIN,
+                    f"Incomplete data in section [{subscenario}], is omitted.",
+                )
+
+    return subsessions_dict
+
+
 def ParseSessionEpoch(
     pt: ConfigParser,
     field: str,
@@ -186,6 +271,54 @@ def ParseSessionEpoch(
         )
 
     return True, addInfo, epoch_session
+
+
+def _parse_subsession_epoch(
+    pt: ConfigParser, section: str, prefix: str = "initial", verbose=True
+) -> tuple:
+    epoch_session = GPS_Time()
+    fields = ["year", "month", "day", "hour", "minute", "second"]
+
+    try:
+        kwargs = {}
+        for f in fields:
+            key = f"{f}_{prefix}"
+            kwargs[f] = pt.getint(section, key)
+
+        epoch_session = GPS_Time(
+            year=kwargs["year"],
+            month=kwargs["month"],
+            day=kwargs["day"],
+            hour=kwargs["hour"],
+            minute=kwargs["minute"],
+            second=kwargs["second"],
+        )
+
+        if verbose:
+            Logger.log_message(
+                Logger.Category.DEBUG,
+                Logger.Module.READER,
+                f"{section} - {prefix}_epoch: {epoch_session.calendar_column_str_d()}",
+            )
+
+        return True, epoch_session
+
+    except (NoSectionError, NoOptionError):
+        if verbose:
+            Logger.log_message(
+                Logger.Category.WARNING,
+                Logger.Module.READER,
+                f"Missing fields for '{prefix}' epoch in section [{section}]",
+            )
+        return False, epoch_session
+    except ParsingError:
+        if verbose:
+            Logger.log_message(
+                Logger.Category.WARNING,
+                Logger.Module.READER,
+                f"Bad format for '{prefix}' epoch in section [{section}]",
+            )
+        return False, epoch_session
 
 
 def ParseSessionField(
