@@ -16,6 +16,7 @@ from rlnav.env.wrapper import RLWrapper
 from rlnav.managers import reward_mgr
 from rlnav.recorder.reward_recorder import RewardRecorder
 from rlnav.types.reference_types import ReferenceMode, ReferenceType
+from rlnav.types.utils import get_parent_scenario_name, is_scenario_subset
 
 
 @Log_Handle
@@ -46,6 +47,7 @@ class WrapperManager:
         scenarios_path,
         n_scenarios,
         priority_scen,
+        scenarios_subset,
         output_path,
         npt_run: Run,
         rewardMgr: reward_mgr.RewardManager,
@@ -61,15 +63,16 @@ class WrapperManager:
                 ]
             )
 
-            if priority_scen in all_scenarios:
-                all_scenarios.remove(priority_scen)
-                all_scenarios.insert(0, priority_scen)
-            else:
-                Logger.log_message(
-                    Logger.Category.WARNING,
-                    Logger.Module.NONE,
-                    f"Priority scenario '{priority_scen}' not found. Maintaining normal order.",
-                )
+            for scen in reversed(priority_scen):
+                if scen in all_scenarios:
+                    all_scenarios.remove(scen)
+                    all_scenarios.insert(0, scen)
+                else:
+                    Logger.log_message(
+                        Logger.Category.WARNING,
+                        Logger.Module.NONE,
+                        f"Priority scenario '{priority_scen}' not found. Maintaining normal order.",
+                    )
 
             first_scen, last_scen = n_scenarios
             if last_scen != -1:
@@ -77,6 +80,21 @@ class WrapperManager:
 
             else:
                 self.scenarios = all_scenarios[first_scen:]
+
+            if scenarios_subset:
+                updated_scenarios = []
+                for scenario in self.scenarios:
+                    if any([scenario in subset for subset in scenarios_subset]):
+                        updated_scenarios.extend(
+                            [
+                                subset
+                                for subset in scenarios_subset
+                                if subset.startswith(scenario)
+                            ]
+                        )
+                    else:
+                        updated_scenarios.append(scenario)
+                self.scenarios = updated_scenarios
 
         else:
             log_msg = (
@@ -152,15 +170,19 @@ class WrapperManager:
             first_it := self.scenario_generation[self.scenario] == -1
         ) or self.scenario_generation[self.scenario] >= self.num_generations:
             time_dst = "next_scenario"
+            prev_scenario = ""
+
             if first_it:
                 self.scenario_generation[self.scenario] = 1
                 logs_npt["generation"] = self.scenario_generation[self.scenario]
 
             else:
                 try:
+                    prev_scenario = self.scenario
                     self.scenario = next(self.scenario_it)
                     self.scenario_generation[self.scenario] = 1
                     logs_npt["generation"] = self.scenario_generation[self.scenario]
+
                 except StopIteration:
                     Logger.log_message(
                         Logger.Category.WARNING,
@@ -171,147 +193,39 @@ class WrapperManager:
 
             logs_npt["scenario"] = self.scenario
 
-            scenario_path = os.path.join(self.scenarios_path, self.scenario)
-
-            config_path = os.path.join(scenario_path, "CONFIG")
-            session_path = os.path.join(config_path, "session.ini")
-            scenario_info_path = os.path.join(scenario_path, "scenario.ini")
-            reference_file_path = os.path.join(
-                scenario_path, "INPUTS/REF/kinematic_reference.parquet"
-            )
-
-            if (dir_error := not os.path.isdir(config_path)) or not os.path.isfile(
-                session_path
+            if (
+                is_scenario_subset(self.scenario) and is_scenario_subset(prev_scenario)
+            ) and (
+                (parent_scenario_name := get_parent_scenario_name(self.scenario))
+                == get_parent_scenario_name(prev_scenario)
             ):
-                log_msg = f"Session file ({session_path}) not exists or CONFIG directory not exists in {scenario_path}"
-                Logger.log_message(
-                    Logger.Category.ERROR,
-                    Logger.Module.CONFIG,
-                    log_msg,
-                )
-                if dir_error:
-                    raise NotADirectoryError(log_msg)
+                if parent_scenario_name is not None:
+                    self._init_subscenario(parent_scenario_name)
+
                 else:
-                    raise FileNotFoundError(log_msg)
-
-            if not (result := parser_utils.parse_session_file(session_path))[0]:
-                _, _, _, _, addInfo_session, _, _ = result
-                log_msg = f"Error processing session file: {addInfo_session}"
-                Logger.log_message(
-                    Logger.Category.DEBUG,
-                    Logger.Module.READER,
-                    log_msg,
-                )
-                raise ValueError(log_msg)
-
-            (
-                _,
-                config_file_path,
-                wrapper_file_path,
-                tracing_config_file,
-                _,
-                initial_epoch_session,
-                final_epoch_session,
-            ) = result
-
-            if not (result := parser_utils.parse_scenario_file(scenario_info_path))[0]:
-                Logger.log_message(
-                    Logger.Category.DEBUG,
-                    Logger.Module.READER,
-                    f"Error reading scenario info, default reference mode and type used",
-                )
-                ref_mode = ReferenceMode.KINEMATIC
-                ref_type = ReferenceType.Kinematic.SPAN_FILE
+                    raise ValueError("Error getting parent scenario name")
 
             else:
-                (
-                    _,
-                    ref_mode,
-                    ref_type,
-                ) = result
-
-            output_path = os.path.join(self.output_path, self.scenario)
-            os.makedirs(output_path, exist_ok=True)
-
-            self.configMgr.reset(output_path, tracing_config_file)
-            self.wrapper_data.reset(initial_epoch_session, final_epoch_session)
-
-            self.rewardMgr.load_reference(reference_file_path, ref_mode, ref_type)
-            self.rewardMgr.set_output_path(
-                self.reward_rec,
-                output_path,
-                self.scenario,
-                self.scenario_generation[self.scenario],
-            )
-
-            self._copy_files_from_scenario(
-                session_path,
-                config_file_path,
-                tracing_config_file,
-                output_path,
-            )
-
-            ################################################
-            #################  PROCESSING  #################
-            ################################################
-            if not (result := self.configMgr.parse_config_file(config_file_path))[0]:
-                _, addInfo = result
-                log_msg = f"Error processing config file: {addInfo}"
-
-                Logger.log_message(
-                    Logger.Category.ERROR,
-                    Logger.Module.MAIN,
-                    log_msg,
-                )
-
-                self.close_PE()
-                raise ValueError(log_msg)
-
-            if not (
-                result := self.wrapper_data.parse_wrapper_file(
-                    wrapper_file_path, parsing_rate
-                )
-            )[0]:
-                _, addInfo = result
-                log_msg = f"Error processing wrapper file: {addInfo}"
-
-                Logger.log_message(
-                    Logger.Category.ERROR,
-                    Logger.Module.MAIN,
-                    log_msg,
-                )
-
-                self.close_PE()
-                raise ValueError(log_msg)
-
-            _, addInfo = result
-
-            os.makedirs(
-                (
-                    output_noai := self.configMgr.get_config(
-                        use_ai_multipath=False
-                    ).log_path.decode("utf-8")
-                ),
-                exist_ok=True,
-            )
-
-            baseline_file_path = os.path.join(
-                scenario_path, "INPUTS/AI/PE_Baseline.parquet"
-            )
-
-            if not os.path.isfile(baseline_file_path):
-                if not self.pe_wrapper.process_scenario(None, None, output_noai, None):
-                    Logger.log_message(
-                        Logger.Category.ERROR,
-                        Logger.Module.MAIN,
-                        f"Error processing scenario",
+                scenario_path = os.path.join(self.scenarios_path, self.scenario)
+                if not os.path.isdir(scenario_path) and is_scenario_subset(
+                    self.scenario
+                ):
+                    scenario_path = os.path.join(
+                        self.scenarios_path,
+                        (
+                            parent_scenario_name := get_parent_scenario_name(
+                                self.scenario
+                            )
+                        ),
                     )
-                    return False
+                    subset = True
 
-                self.rewardMgr.save_baseline(baseline_file_path)
+                else:
+                    subset = False
 
-            else:
-                self.rewardMgr.load_baseline(baseline_file_path)
+                self._init_scenario(scenario_path, parsing_rate)
+                if subset:
+                    self._init_subscenario(parent_scenario_name)
 
         else:
             time_dst = "restart_scenario"
@@ -331,12 +245,226 @@ class WrapperManager:
 
         return True
 
+    def _init_scenario(self, scenario_path, parsing_rate):
+        config_path = os.path.join(scenario_path, "CONFIG")
+        session_path = os.path.join(config_path, "session.ini")
+        scenario_info_path = os.path.join(scenario_path, "scenario.ini")
+        reference_file_path = os.path.join(
+            scenario_path, "INPUTS/REF/kinematic_reference.parquet"
+        )
+
+        if (dir_error := not os.path.isdir(config_path)) or not os.path.isfile(
+            session_path
+        ):
+            log_msg = f"Session file ({session_path}) not exists or CONFIG directory not exists in {scenario_path}"
+            Logger.log_message(
+                Logger.Category.ERROR,
+                Logger.Module.CONFIG,
+                log_msg,
+            )
+            if dir_error:
+                raise NotADirectoryError(log_msg)
+            else:
+                raise FileNotFoundError(log_msg)
+
+        if not (result := parser_utils.parse_session_file(session_path))[0]:
+            _, _, _, _, addInfo_session, _, _ = result
+            log_msg = f"Error processing session file: {addInfo_session}"
+            Logger.log_message(
+                Logger.Category.DEBUG,
+                Logger.Module.READER,
+                log_msg,
+            )
+            raise ValueError(log_msg)
+
+        (
+            _,
+            config_file_path,
+            wrapper_file_path,
+            tracing_config_file,
+            _,
+            initial_epoch_session,
+            final_epoch_session,
+        ) = result
+
+        if not (result := parser_utils.parse_scenario_file(scenario_info_path))[0]:
+            Logger.log_message(
+                Logger.Category.DEBUG,
+                Logger.Module.READER,
+                f"Error reading scenario info, default reference mode and type used",
+            )
+            ref_mode = ReferenceMode.KINEMATIC
+            ref_type = ReferenceType.Kinematic.SPAN_FILE
+
+        else:
+            (
+                _,
+                ref_mode,
+                ref_type,
+            ) = result
+
+        output_path = os.path.join(self.output_path, self.scenario)
+        os.makedirs(output_path, exist_ok=True)
+
+        self.configMgr.reset(output_path, tracing_config_file)
+        self.wrapper_data.reset(initial_epoch_session, final_epoch_session)
+
+        self.rewardMgr.load_reference(reference_file_path, ref_mode, ref_type)
+        self.rewardMgr.set_output_path(
+            self.reward_rec,
+            output_path,
+            self.scenario,
+            self.scenario_generation[self.scenario],
+        )
+
+        self._copy_files_from_scenario(
+            session_path,
+            config_file_path,
+            tracing_config_file,
+            output_path,
+        )
+
+        ################################################
+        #################  PROCESSING  #################
+        ################################################
+        if not (result := self.configMgr.parse_config_file(config_file_path))[0]:
+            _, addInfo = result
+            log_msg = f"Error processing config file: {addInfo}"
+
+            Logger.log_message(
+                Logger.Category.ERROR,
+                Logger.Module.MAIN,
+                log_msg,
+            )
+
+            self.close_PE()
+            raise ValueError(log_msg)
+
+        if not (
+            result := self.wrapper_data.parse_wrapper_file(
+                wrapper_file_path, parsing_rate
+            )
+        )[0]:
+            _, addInfo = result
+            log_msg = f"Error processing wrapper file: {addInfo}"
+
+            Logger.log_message(
+                Logger.Category.ERROR,
+                Logger.Module.MAIN,
+                log_msg,
+            )
+
+            self.close_PE()
+            raise ValueError(log_msg)
+
+        _, addInfo = result
+
+        os.makedirs(
+            (
+                output_noai := self.configMgr.get_config(
+                    use_ai_multipath=False
+                ).log_path.decode("utf-8")
+            ),
+            exist_ok=True,
+        )
+
+        baseline_file_path = os.path.join(
+            scenario_path, "INPUTS/AI/PE_Baseline.parquet"
+        )
+
+        if not os.path.isfile(baseline_file_path):
+            if not self.pe_wrapper.process_scenario(None, None, output_noai, None):
+                Logger.log_message(
+                    Logger.Category.ERROR,
+                    Logger.Module.MAIN,
+                    f"Error processing scenario",
+                )
+
+            self.rewardMgr.save_baseline(baseline_file_path)
+
+        else:
+            self.rewardMgr.load_baseline(baseline_file_path)
+
+    def _init_subscenario(self, parent_scenario_name):
+        scenario_path = os.path.join(self.scenarios_path, parent_scenario_name)
+        config_path = os.path.join(scenario_path, "CONFIG")
+        session_path = os.path.join(config_path, "session.ini")
+        subsession_path = os.path.join(config_path, "subsessions.ini")
+
+        if (dir_error := not os.path.isdir(config_path)) or not os.path.isfile(
+            subsession_path
+        ):
+            log_msg = f"Subsession file ({subsession_path}) not exists or CONFIG directory not exists in {scenario_path}"
+            Logger.log_message(
+                Logger.Category.ERROR,
+                Logger.Module.CONFIG,
+                log_msg,
+            )
+            if dir_error:
+                raise NotADirectoryError(log_msg)
+            else:
+                raise FileNotFoundError(log_msg)
+
+        if not (result := parser_utils.parse_session_file(session_path, verbose=False))[
+            0
+        ]:
+            _, _, _, _, addInfo_session, _, _ = result
+            log_msg = f"Error processing session file: {addInfo_session}"
+            Logger.log_message(
+                Logger.Category.DEBUG,
+                Logger.Module.READER,
+                log_msg,
+            )
+            raise ValueError(log_msg)
+
+        (
+            _,
+            config_file_path,
+            _,
+            tracing_config_file,
+            _,
+            initial_epoch_session,
+            final_epoch_session,
+        ) = result
+
+        subsession_epochs = parser_utils.parse_subsessions_file(
+            subsession_path, self.scenario
+        )
+        if subsession_epochs:
+            initial_epoch = subsession_epochs["InitialEpoch"]
+            final_epoch = subsession_epochs["FinalEpoch"]
+        else:
+            initial_epoch = initial_epoch_session
+            final_epoch = final_epoch_session
+
+        output_path = os.path.join(self.output_path, self.scenario)
+        os.makedirs(output_path, exist_ok=True)
+
+        self.configMgr.reset_log_path(output_path)
+        self.wrapper_data.reset_epochs(initial_epoch, final_epoch)
+
+        self.rewardMgr.set_output_path(
+            self.reward_rec,
+            output_path,
+            self.scenario,
+            self.scenario_generation[self.scenario],
+        )
+
+        self._copy_files_from_scenario(
+            session_path,
+            config_file_path,
+            tracing_config_file,
+            output_path,
+            subsession_epochs,
+        )
+
     def _copy_files_from_scenario(
         self,
         session_pe_file_path,
         wrapper_config_file_path,
         wrapper_tracing_file_path,
         output_path,
+        change_session_epochs=None,
     ):
         # COPY INPUT FILES TO OUTPUT FOLDER
         if not os.path.exists(output_path):
@@ -345,7 +473,15 @@ class WrapperManager:
         # Session Config file
         session_file_destination = os.path.join(output_path, "session.ini")
         if os.path.isfile(session_pe_file_path):
-            shutil.copyfile(session_pe_file_path, session_file_destination)
+            if change_session_epochs is None or not change_session_epochs:
+                shutil.copyfile(session_pe_file_path, session_file_destination)
+            else:
+                parser_utils.write_session_file(
+                    session_pe_file_path,
+                    session_file_destination,
+                    change_session_epochs,
+                )
+
         else:
             Logger.log_message(
                 Logger.Category.WARNING,

@@ -28,6 +28,14 @@ class WrapperDataManager(metaclass=Singleton):
     ):
         self.__init__(initial_epoch_constr, final_epoch_constr, self.configMgr_)
 
+    def reset_epochs(
+        self,
+        initial_epoch_constr: GPS_Time,
+        final_epoch_constr: GPS_Time,
+    ):
+        self.initial_epoch = initial_epoch_constr
+        self.final_epoch = final_epoch_constr
+
     def parse_wrapper_file(self, filename: str, parsing_rate: int) -> Tuple[bool, str]:
         addInfo = []
         Logger.log_message(
@@ -95,15 +103,6 @@ class WrapperDataManager(metaclass=Singleton):
                 )
             addInfo.clear()
             df = df[df["parse_line"]]
-
-            initial_epoch_dt = pd.to_datetime(
-                self.initial_epoch.calendar_column_str_d(),
-                format="%Y %m %d %H %M %S.%f",
-            )
-            final_epoch_dt = pd.to_datetime(
-                self.final_epoch.calendar_column_str_d(), format="%Y %m %d %H %M %S.%f"
-            )
-            df = df[(df["epoch"] >= initial_epoch_dt) & (df["epoch"] <= final_epoch_dt)]
 
             imu_latency = pd.to_timedelta(-self.configMgr_.IMU_latency_, unit="s")
             odo_latency = pd.to_timedelta(-self.configMgr_.ODO_latency_, unit="s")
@@ -299,13 +298,37 @@ class WrapperDataManager(metaclass=Singleton):
         return df[["epoch", "msg_type", "msg_data"]], addInfo
 
     def items(self):
-        return self._wrapper_file_data.to_numpy()
+        initial_epoch = pd.to_datetime(
+            self.initial_epoch.calendar_column_str_d(),
+            format="%Y %m %d %H %M %S.%f",
+        )
+        final_epoch = pd.to_datetime(
+            self.final_epoch.calendar_column_str_d(),
+            format="%Y %m %d %H %M %S.%f",
+        )
+        df = self._wrapper_file_data[
+            (self._wrapper_file_data["epoch"] >= initial_epoch)
+            & (self._wrapper_file_data["epoch"] <= final_epoch)
+        ]
+        return df.to_numpy()
 
     def get(
         self, key: GPS_Time, default=pd.DataFrame(columns=["msg_type", "msg_data"])
     ) -> pd.DataFrame:
-        return self._wrapper_file_data.loc[
-            self._wrapper_file_data["epoch"]
+        initial_epoch = pd.to_datetime(
+            self.initial_epoch.calendar_column_str_d(),
+            format="%Y %m %d %H %M %S.%f",
+        )
+        final_epoch = pd.to_datetime(
+            self.final_epoch.calendar_column_str_d(),
+            format="%Y %m %d %H %M %S.%f",
+        )
+        df = self._wrapper_file_data[
+            (self._wrapper_file_data["epoch"] >= initial_epoch)
+            & (self._wrapper_file_data["epoch"] <= final_epoch)
+        ]
+        return df.loc[
+            df["epoch"]
             == pd.to_datetime(
                 key.calendar_column_str_d(), format="%Y %m %d %H %M %S.%f"
             ),
@@ -313,4 +336,16 @@ class WrapperDataManager(metaclass=Singleton):
         ]
 
     def __iter__(self):
-        return iter(self._wrapper_file_data.groupby("epoch"))
+        initial_epoch = pd.to_datetime(
+            self.initial_epoch.calendar_column_str_d(),
+            format="%Y %m %d %H %M %S.%f",
+        )
+        final_epoch = pd.to_datetime(
+            self.final_epoch.calendar_column_str_d(),
+            format="%Y %m %d %H %M %S.%f",
+        )
+        df = self._wrapper_file_data[
+            (self._wrapper_file_data["epoch"] >= initial_epoch)
+            & (self._wrapper_file_data["epoch"] <= final_epoch)
+        ]
+        return iter(df.groupby("epoch"))

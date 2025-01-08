@@ -1,3 +1,5 @@
+import re
+
 import pewrapper.types.constants as pe_const
 
 MAX_SATS_PER_CONSTEL = {
@@ -16,3 +18,22 @@ def get_global_sat_idx(cons_idx: int, sat_idx: int, freq_idx: int = None) -> int
         global_offset += freq_idx * pe_const.MAX_SATS
 
     return global_offset + sat_idx
+
+
+def get_parent_scenario_name(scenario_name):
+    pattern = r"^(.*?\d{8})"
+    pattern_match = re.search(pattern, scenario_name)
+
+    if pattern_match:
+        return pattern_match.group(1)
+    else:
+        return scenario_name
+
+
+def is_scenario_subset(sceario_name):
+    if sceario_name:
+        parent = get_parent_scenario_name(sceario_name)
+        return len(sceario_name) > len(parent)
+
+    else:
+        return False

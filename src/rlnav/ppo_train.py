@@ -54,6 +54,7 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
         config.scenarios.path,
         (config.scenarios.skip_first, config.scenarios.n_scenarios),
         config.scenarios.priority,
+        config.scenarios.subscenarios,
         output_path,
         npt_run,
         rewardMgr,
