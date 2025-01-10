@@ -296,6 +296,11 @@ class RewardManager:
                 else:
                     reward = -np.log(ai_rmse / (pe_rmse + 1e-6))
 
+                reward = np.tanh(reward)
+
+            elif ai_ref_df is None and not pe_ref_df.empty:
+                reward = -1.0
+
             else:
                 reward = 0.0
 

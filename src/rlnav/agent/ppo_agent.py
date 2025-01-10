@@ -1,28 +1,48 @@
 import io
-from typing import Optional, Sequence, Text, Tuple
+from typing import Optional, Text, Tuple
 
+import rlnav.networks.ppo_networks as ppo_networks
 import tensorflow as tf
 from absl import logging
 from neptune import Run
-from tf_agents.agents import data_converter, tf_agent
-from tf_agents.agents.ppo import ppo_agent, ppo_utils
+from rlnav.agent.ppo_policy import PPOPolicyMasked
+from tf_agents.agents import data_converter
+from tf_agents.agents.ppo import ppo_agent
 from tf_agents.environments import TFPyEnvironment
 from tf_agents.networks import layer_utils, network
 from tf_agents.policies import greedy_policy
 from tf_agents.specs import tensor_spec
 from tf_agents.trajectories import time_step as ts
 from tf_agents.typing import types
-from tf_agents.utils import (
-    common,
-    eager_utils,
-    nest_utils,
-    object_identity,
-    tensor_normalizer,
-)
+from tf_agents.utils import common, tensor_normalizer
 
-import rlnav.agent.multivariatenormaldiag_distribution as multiDiagNormal
-from rlnav.agent.ppo_networks import *
-from rlnav.agent.ppo_policy import PPOPolicyMasked
+
+def build_mask_for_heads(mask_bin):
+    """
+    Constructs a mask for each satellite head based on the input binary mask.
+
+    Args:
+        mask_bin (tf.Tensor): A tensor of shape (B, 286) or (B, T, 286) with 0/1 indicating if satellite i is available.
+    Returns:
+        tuple: A tuple of length 286. Each element is a tensor of shape (B, 2) or (B, T, 2).
+    """
+    rank = tf.rank(mask_bin)
+    squeeze_axis = None
+    if rank == 2:
+        mask_bin = mask_bin[:, tf.newaxis, :]
+        squeeze_axis = 1
+
+    mask_bin_per_sat = tf.unstack(mask_bin, axis=-1)
+    heads_mask_list = []
+    for sat_mask_b in mask_bin_per_sat:
+        valid_sat = tf.cast(sat_mask_b, tf.bool)[..., tf.newaxis]
+        all_true = tf.ones_like(valid_sat, dtype=tf.bool)
+        sat_mask_2 = tf.concat([all_true, valid_sat], axis=-1)
+        if squeeze_axis is not None:
+            sat_mask_2 = tf.squeeze(sat_mask_2, axis=squeeze_axis)
+        heads_mask_list.append(sat_mask_2)
+
+    return tuple(heads_mask_list)
 
 
 def splitter(
@@ -45,7 +65,7 @@ def splitter(
     """
     mask = observation[..., 0]
 
-    return observation, mask
+    return observation, build_mask_for_heads(mask)
 
 
 class PPOAgentMasked(ppo_agent.PPOAgent):
@@ -370,796 +390,6 @@ class PPOAgentMasked(ppo_agent.PPOAgent):
             self.data_context, sequence_length=None
         )
 
-    def log_probability(self, distributions, actions, action_spec, mask=None):
-        """Computes log probability of actions given distribution, applying a mask.
-
-        Args:
-            distributions: A possibly batched tuple of distributions.
-            actions: A possibly batched action tuple.
-            action_spec: A nested tuple representing the action spec.
-            mask: Optional mask to apply to the log probability per action dimension.
-
-        Returns:
-            A Tensor representing the log probability of each action in the batch.
-        """
-        outer_rank = nest_utils.get_outer_rank(actions, action_spec)
-
-        def _compute_log_prob(single_distribution, single_action, single_mask):
-            epsilon = 1e-6
-            # Inverse transformation on actions
-            single_action = single_distribution.bijector.inverse(single_action)
-            single_action = tf.clip_by_value(single_action, epsilon, 1 - epsilon)
-
-            # Compute log_prob per dimension
-            single_log_prob = single_distribution.distribution.distribution.log_prob(
-                single_action
-            )
-
-            # Apply mask if provided
-            if single_mask is not None:
-                single_log_prob *= single_mask
-
-            # single_log_prob = tf.where(
-            #     tf.math.is_finite(single_log_prob),
-            #     single_log_prob,
-            #     tf.zeros_like(single_log_prob),
-            # )
-
-            # Sum log-probs over action dimensions
-            rank = single_log_prob.shape.rank
-            reduce_dims = list(range(outer_rank, rank))
-            return tf.reduce_sum(single_log_prob, axis=reduce_dims)
-
-        nest_utils.assert_same_structure(distributions, actions)
-        flat_distributions = tf.nest.flatten(distributions)
-        flat_actions = tf.nest.flatten(actions)
-        flat_masks = (
-            tf.nest.flatten(mask) if mask is not None else [None] * len(flat_actions)
-        )
-
-        log_probs = [
-            _compute_log_prob(dist, action, m)
-            for (dist, action, m) in zip(flat_distributions, flat_actions, flat_masks)
-        ]
-
-        total_log_probs = tf.add_n(log_probs)
-        return total_log_probs
-
-    def entropy(self, distributions, action_spec, outer_rank=None, mask=None):
-        """Computes total entropy of distribution, applying a mask.
-
-        Args:
-            distributions: A possibly batched tuple of distributions.
-            action_spec: A nested tuple representing the action spec.
-            outer_rank: Optional outer rank of the distributions. If not provided use
-            distribution.mode() to compute it.
-            mask: Optional mask to apply to the entropy per action dimension.
-
-        Returns:
-            A Tensor representing the entropy of each distribution in the batch.
-            Assumes actions are independent, so that marginal entropies of each action
-            may be summed.
-        """
-        if outer_rank is None:
-            nested_modes = tf.nest.map_structure(lambda d: d.mode(), distributions)
-            outer_rank = nest_utils.get_outer_rank(nested_modes, action_spec)
-
-        def _compute_entropy(single_distribution, single_mask):
-            try:
-                # Compute entropy per dimension
-                entropy_per_dim = (
-                    single_distribution.distribution.distribution.entropy()
-                )
-
-                # Apply mask if provided
-                if single_mask is not None:
-                    entropy_per_dim *= single_mask
-
-                # Sum entropies over action dimensions
-                rank = entropy_per_dim.shape.rank
-                reduce_dims = list(range(outer_rank, rank))
-                return tf.reduce_sum(entropy_per_dim, axis=reduce_dims)
-            except NotImplementedError:
-                return None
-
-        nest_utils.assert_same_structure(distributions, action_spec)
-        flat_distributions = tf.nest.flatten(distributions)
-        flat_masks = (
-            tf.nest.flatten(mask)
-            if mask is not None
-            else [None] * len(flat_distributions)
-        )
-
-        entropies = []
-        for dist, m in zip(flat_distributions, flat_masks):
-            entropy_dist = _compute_entropy(dist, m)
-            if entropy_dist is not None:
-                entropies.append(entropy_dist)
-
-        # Sum entropies over action tuple.
-        if not entropies:
-            return None
-
-        return tf.add_n(entropies)
-
-    def nested_kl_divergence(
-        self,
-        nested_from_distribution: types.NestedDistribution,
-        nested_to_distribution: types.NestedDistribution,
-        outer_dims: Sequence[int] = (),
-        mask: Optional[types.Tensor] = None,  # type: ignore
-    ) -> types.Tensor:  # type: ignore
-        """Given two nested distributions, sum the KL divergences of the leaves, applying a mask."""
-        nest_utils.assert_same_structure(
-            nested_from_distribution, nested_to_distribution
-        )
-
-        # Make list pairs of leaf distributions.
-        flat_from_distribution = tf.nest.flatten(nested_from_distribution)
-        flat_to_distribution = tf.nest.flatten(nested_to_distribution)
-        flat_masks = (
-            tf.nest.flatten(mask)
-            if mask is not None
-            else [None] * len(flat_from_distribution)
-        )
-
-        all_kl_divergences = []
-        for from_dist, to_dist, m in zip(
-            flat_from_distribution, flat_to_distribution, flat_masks
-        ):
-            kl_divergence = from_dist.distribution.distribution.kl_divergence(
-                to_dist.distribution.distribution
-            )
-            if m is not None:
-                kl_divergence *= m  # Apply mask
-
-            # Reduce_sum over non-batch dimensions.
-            reduce_dims = list(range(len(kl_divergence.shape)))
-            for dim in outer_dims:
-                reduce_dims.remove(dim)
-            kl_divergence_reduced = tf.reduce_sum(
-                input_tensor=kl_divergence, axis=reduce_dims
-            )
-            all_kl_divergences.append(kl_divergence_reduced)
-
-        # Sum the kl of the leaves.
-        total_kl = tf.add_n(all_kl_divergences)
-
-        return total_kl
-
-    def get_loss(
-        self,
-        time_steps: ts.TimeStep,
-        actions: types.NestedTensorSpec,
-        act_log_probs: types.Tensor,  # type: ignore
-        returns: types.Tensor,  # type: ignore
-        normalized_advantages: types.Tensor,  # type: ignore
-        action_distribution_parameters: types.NestedTensor,
-        weights: types.Tensor,  # type: ignore
-        train_step: tf.Variable,
-        debug_summaries: bool,
-        old_value_predictions: Optional[types.Tensor] = None,  # type: ignore
-        training: bool = False,
-    ) -> tf_agent.LossInfo:
-        """Compute the loss and create optimization op for one training epoch.
-
-        All tensors should have a single batch dimension.
-
-        Args:
-            time_steps: A minibatch of TimeStep tuples.
-            actions: A minibatch of actions.
-            act_log_probs: A minibatch of action probabilities (probability under the
-                sampling policy).
-            returns: A minibatch of per-timestep returns.
-            normalized_advantages: A minibatch of normalized per-timestep advantages.
-            action_distribution_parameters: Parameters of data-collecting action
-                distribution. Needed for KL computation.
-            weights: Optional scalar or element-wise (per-batch-entry) importance
-                weights.    Includes a mask for invalid timesteps.
-            train_step: A train_step variable to increment for each train step.
-                Typically the global_step.
-            debug_summaries: True if debug summaries should be created.
-            old_value_predictions: (Optional) The saved value predictions, used for
-                calculating the value estimation loss when value clipping is performed.
-            training: Whether this loss is being used for training.
-
-        Returns:
-            A tf_agent.LossInfo named tuple with the total_loss and all intermediate
-                losses in the extra field contained in a PPOLossInfo named tuple.
-        """
-        # Evaluate the current policy on timesteps.
-
-        # batch_size from time_steps
-        batch_size = nest_utils.get_outer_shape(time_steps, self._time_step_spec)[0]
-        policy_state = self._collect_policy.get_initial_state(batch_size)
-        # We must use _distribution because the distribution API doesn't pass down
-        # the training= kwarg.
-        distribution_step = (
-            self._collect_policy._distribution(  # pylint: disable=protected-access
-                time_steps, policy_state, training=training
-            )
-        )
-        # TODO(eholly): Rename policy distributions to something clear and uniform.
-        current_policy_distribution = distribution_step.action
-
-        # Call all loss functions and add all loss values.
-        value_estimation_loss = self.value_estimation_loss(
-            time_steps=time_steps,
-            returns=returns,
-            old_value_predictions=old_value_predictions,
-            weights=weights,
-            debug_summaries=debug_summaries,
-            training=training,
-        )
-        policy_gradient_loss = self.policy_gradient_loss(
-            time_steps,
-            actions,
-            tf.stop_gradient(act_log_probs),
-            tf.stop_gradient(normalized_advantages),
-            current_policy_distribution,
-            weights,
-            debug_summaries=debug_summaries,
-        )
-
-        if (
-            self._policy_l2_reg > 0.0
-            or self._value_function_l2_reg > 0.0
-            or self._shared_vars_l2_reg > 0.0
-        ):
-            l2_regularization_loss = self.l2_regularization_loss(debug_summaries)
-        else:
-            l2_regularization_loss = tf.zeros_like(policy_gradient_loss)
-
-        with tf.name_scope("entropy_regularization"):
-            outer_rank = nest_utils.get_outer_rank(time_steps, self.time_step_spec)
-
-            _, availability_indicator = (
-                self._observation_and_action_constraint_splitter(time_steps.observation)
-            )
-            action_mask = tf.cast(availability_indicator, tf.float32)  # Cast to float
-
-            entropy = self.entropy(
-                current_policy_distribution,
-                self.action_spec,
-                outer_rank,
-                mask=action_mask,
-            )
-            if entropy is None:
-                entropy = tf.zeros_like(weights, tf.float32)
-            else:
-                entropy = tf.cast(entropy, tf.float32)
-        if self._entropy_regularization > 0.0:
-            entropy_regularization_loss = self.entropy_regularization_loss(
-                time_steps, entropy, weights, debug_summaries
-            )
-        else:
-            entropy_regularization_loss = tf.zeros_like(policy_gradient_loss)
-
-        with tf.name_scope("Losses/"):
-            tf.compat.v2.summary.scalar(
-                name="entropy",
-                data=tf.reduce_mean(entropy * weights),
-                step=self.train_step_counter,
-            )
-
-        # TODO(b/161365079): Move this logic to PPOKLPenaltyAgent.
-        if self._initial_adaptive_kl_beta == 0 and self._kl_cutoff_factor == 0:
-            kl_penalty_loss = tf.zeros_like(policy_gradient_loss)
-        else:
-            kl_penalty_loss = self.kl_penalty_loss(
-                time_steps,
-                action_distribution_parameters,
-                current_policy_distribution,
-                weights,
-                debug_summaries,
-            )
-
-        total_loss = (
-            policy_gradient_loss
-            + value_estimation_loss
-            + l2_regularization_loss
-            + entropy_regularization_loss
-            + kl_penalty_loss
-        )
-
-        return tf_agent.LossInfo(
-            total_loss,
-            ppo_agent.PPOLossInfo(
-                policy_gradient_loss=policy_gradient_loss,
-                value_estimation_loss=value_estimation_loss,
-                l2_regularization_loss=l2_regularization_loss,
-                entropy_regularization_loss=entropy_regularization_loss,
-                kl_penalty_loss=kl_penalty_loss,
-                clip_fraction=self._clip_fraction,
-            ),
-        )
-
-    def _train(self, experience, weights):
-        if self._optimizer is None:
-            raise ValueError("Optimizer is undefined.")
-
-        experience = self._as_trajectory(experience)
-
-        if self._compute_value_and_advantage_in_train:
-            processed_experience = self._preprocess(experience)
-        else:
-            processed_experience = experience
-
-        # Mask trajectories that cannot be used for training.
-        valid_mask = ppo_utils.make_trajectory_mask(processed_experience)
-        if weights is None:
-            masked_weights = valid_mask
-        else:
-            masked_weights = weights * valid_mask
-
-        # Reconstruct per-timestep policy distribution from stored distribution
-        #     parameters.
-        old_action_distribution_parameters = processed_experience.policy_info[
-            "dist_params"
-        ]
-
-        old_actions_distribution = ppo_utils.distribution_from_spec(
-            self._action_distribution_spec,
-            old_action_distribution_parameters,
-            legacy_distribution_network=isinstance(
-                self._actor_net, network.DistributionNetwork
-            ),
-        )
-
-        _, availability_indicator = self._observation_and_action_constraint_splitter(
-            processed_experience.observation
-        )
-        action_mask = tf.cast(availability_indicator, tf.float32)  # Cast to float
-
-        # Compute log probability of actions taken during data collection, using the
-        #     collect policy distribution.
-        old_act_log_probs = self.log_probability(
-            old_actions_distribution,
-            processed_experience.action,
-            self._action_spec,
-            action_mask,
-        )
-
-        # TODO(b/171573175): remove the condition once histograms are
-        # supported on TPUs.
-        if self._debug_summaries and not tf.config.list_logical_devices("TPU"):
-            actions_list = tf.nest.flatten(processed_experience.action)
-            show_action_index = len(actions_list) != 1
-            for i, single_action in enumerate(actions_list):
-                action_name = "actions_{}".format(i) if show_action_index else "actions"
-                tf.compat.v2.summary.histogram(
-                    name=action_name, data=single_action, step=self.train_step_counter
-                )
-
-        time_steps = ts.TimeStep(
-            step_type=processed_experience.step_type,
-            reward=processed_experience.reward,
-            discount=processed_experience.discount,
-            observation=processed_experience.observation,
-        )
-        actions = processed_experience.action
-        returns = processed_experience.policy_info["return"]
-        advantages = processed_experience.policy_info["advantage"]
-
-        normalized_advantages = ppo_agent._normalize_advantages(
-            advantages, variance_epsilon=1e-8
-        )
-
-        # TODO(b/171573175): remove the condition once histograms are
-        # supported on TPUs.
-        if self._debug_summaries and not tf.config.list_logical_devices("TPU"):
-            tf.compat.v2.summary.histogram(
-                name="advantages_normalized",
-                data=normalized_advantages,
-                step=self.train_step_counter,
-            )
-        old_value_predictions = processed_experience.policy_info["value_prediction"]
-
-        batch_size = nest_utils.get_outer_shape(time_steps, self._time_step_spec)[0]
-        # Loss tensors across batches will be aggregated for summaries.
-        policy_gradient_losses = []
-        value_estimation_losses = []
-        l2_regularization_losses = []
-        entropy_regularization_losses = []
-        kl_penalty_losses = []
-
-        loss_info = None  # TODO(b/123627451): Remove.
-        variables_to_train = list(
-            object_identity.ObjectIdentitySet(
-                self._actor_net.trainable_weights + self._value_net.trainable_weights
-            )
-        )
-        # Sort to ensure tensors on different processes end up in same order.
-        variables_to_train = sorted(variables_to_train, key=lambda x: x.name)
-
-        for i_epoch in range(self._num_epochs):
-            with tf.name_scope("epoch_%d" % i_epoch):
-                # Only save debug summaries for first and last epochs.
-                debug_summaries = self._debug_summaries and (
-                    i_epoch == 0 or i_epoch == self._num_epochs - 1
-                )
-
-                with tf.GradientTape() as tape:
-                    loss_info = self.get_loss(
-                        time_steps,
-                        actions,
-                        old_act_log_probs,
-                        returns,
-                        normalized_advantages,
-                        old_action_distribution_parameters,
-                        masked_weights,
-                        self.train_step_counter,
-                        debug_summaries,
-                        old_value_predictions=old_value_predictions,
-                        training=True,
-                    )
-
-                grads = tape.gradient(loss_info.loss, variables_to_train)
-                if self._gradient_clipping > 0:
-                    grads, _ = tf.clip_by_global_norm(grads, self._gradient_clipping)
-
-                self._grad_norm = tf.linalg.global_norm(grads)
-
-                # Tuple is used for py3, where zip is a generator producing values once.
-                grads_and_vars = tuple(zip(grads, variables_to_train))
-
-                # If summarize_gradients, create functions for summarizing both
-                # gradients and variables.
-                if self._summarize_grads_and_vars and debug_summaries:
-                    eager_utils.add_gradients_summaries(
-                        grads_and_vars, self.train_step_counter
-                    )
-                    eager_utils.add_variables_summaries(
-                        grads_and_vars, self.train_step_counter
-                    )
-
-                self._optimizer.apply_gradients(grads_and_vars)
-                self.train_step_counter.assign_add(1)
-
-                policy_gradient_losses.append(loss_info.extra.policy_gradient_loss)
-                value_estimation_losses.append(loss_info.extra.value_estimation_loss)
-                l2_regularization_losses.append(loss_info.extra.l2_regularization_loss)
-                entropy_regularization_losses.append(
-                    loss_info.extra.entropy_regularization_loss
-                )
-                kl_penalty_losses.append(loss_info.extra.kl_penalty_loss)
-
-        # TODO(b/1613650790): Move this logic to PPOKLPenaltyAgent.
-        if self._initial_adaptive_kl_beta > 0:
-            # After update epochs, update adaptive kl beta, then update observation
-            #     normalizer and reward normalizer.
-            policy_state = self._collect_policy.get_initial_state(batch_size)
-            # Compute the mean kl from previous action distribution.
-            kl_divergence = self._kl_divergence(
-                time_steps,
-                old_action_distribution_parameters,
-                self._collect_policy.distribution(time_steps, policy_state).action,
-            )
-            kl_divergence *= masked_weights
-            self.update_adaptive_kl_beta(kl_divergence)
-
-        if self.update_normalizers_in_train:
-            self.update_observation_normalizer(time_steps.observation)
-            self.update_reward_normalizer(processed_experience.reward)
-
-        loss_info = tf.nest.map_structure(tf.identity, loss_info)
-
-        # Make summaries for total loss averaged across all epochs.
-        # The *_losses lists will have been populated by
-        #     calls to self.get_loss. Assumes all the losses have same length.
-        with tf.name_scope("Losses/"):
-            num_epochs = len(policy_gradient_losses)
-            total_policy_gradient_loss = tf.add_n(policy_gradient_losses) / num_epochs
-            total_value_estimation_loss = tf.add_n(value_estimation_losses) / num_epochs
-            total_l2_regularization_loss = (
-                tf.add_n(l2_regularization_losses) / num_epochs
-            )
-            total_entropy_regularization_loss = (
-                tf.add_n(entropy_regularization_losses) / num_epochs
-            )
-            total_kl_penalty_loss = tf.add_n(kl_penalty_losses) / num_epochs
-            tf.compat.v2.summary.scalar(
-                name="policy_gradient_loss",
-                data=total_policy_gradient_loss,
-                step=self.train_step_counter,
-            )
-            tf.compat.v2.summary.scalar(
-                name="value_estimation_loss",
-                data=total_value_estimation_loss,
-                step=self.train_step_counter,
-            )
-            tf.compat.v2.summary.scalar(
-                name="l2_regularization_loss",
-                data=total_l2_regularization_loss,
-                step=self.train_step_counter,
-            )
-            tf.compat.v2.summary.scalar(
-                name="entropy_regularization_loss",
-                data=total_entropy_regularization_loss,
-                step=self.train_step_counter,
-            )
-            tf.compat.v2.summary.scalar(
-                name="kl_penalty_loss",
-                data=total_kl_penalty_loss,
-                step=self.train_step_counter,
-            )
-
-            total_abs_loss = (
-                tf.abs(total_policy_gradient_loss)
-                + tf.abs(total_value_estimation_loss)
-                + tf.abs(total_entropy_regularization_loss)
-                + tf.abs(total_l2_regularization_loss)
-                + tf.abs(total_kl_penalty_loss)
-            )
-
-            tf.compat.v2.summary.scalar(
-                name="total_abs_loss",
-                data=total_abs_loss,
-                step=self.train_step_counter,
-            )
-
-        with tf.name_scope("LearningRate/"):
-            learning_rate = ppo_utils.get_learning_rate(self._optimizer)
-            tf.compat.v2.summary.scalar(
-                name="learning_rate", data=learning_rate, step=self.train_step_counter
-            )
-
-        # TODO(b/171573175): remove the condition once histograms are
-        # supported on TPUs.
-        if self._summarize_grads_and_vars and not tf.config.list_logical_devices("TPU"):
-            with tf.name_scope("Variables/"):
-                all_vars = (
-                    self._actor_net.trainable_weights
-                    + self._value_net.trainable_weights
-                )
-                for var in all_vars:
-                    tf.compat.v2.summary.histogram(
-                        name=var.name.replace(":", "_"),
-                        data=var,
-                        step=self.train_step_counter,
-                    )
-
-        return loss_info
-
-    def policy_gradient_loss(
-        self,
-        time_steps: ts.TimeStep,
-        actions: types.NestedTensor,
-        sample_action_log_probs: types.Tensor,  # type: ignore
-        advantages: types.Tensor,  # type: ignore
-        current_policy_distribution: types.NestedDistribution,
-        weights: types.Tensor,  # type: ignore
-        debug_summaries: bool = False,
-    ) -> types.Tensor:  # type: ignore
-        """Create tensor for policy gradient loss.
-
-        All tensors should have a single batch dimension.
-
-        Args:
-            time_steps: TimeSteps with observations for each timestep.
-            actions: Tensor of actions for timesteps, aligned on index.
-            sample_action_log_probs: Tensor of sample probability of each action.
-            advantages: Tensor of advantage estimate for each timestep, aligned on
-                index. Works better when advantage estimates are normalized.
-            current_policy_distribution: The policy distribution, evaluated on all
-                time_steps.
-            weights: Optional scalar or element-wise (per-batch-entry) importance
-                weights.    Includes a mask for invalid timesteps.
-            debug_summaries: True if debug summaries should be created.
-
-        Returns:
-            policy_gradient_loss: A tensor that will contain policy gradient loss for
-                the on-policy experience.
-        """
-        nest_utils.assert_same_structure(time_steps, self.time_step_spec)
-
-        _, availability_indicator = self._observation_and_action_constraint_splitter(
-            time_steps.observation
-        )
-        action_mask = tf.cast(availability_indicator, tf.float32)  # Cast to float
-
-        action_log_prob = self.log_probability(
-            current_policy_distribution, actions, self._action_spec, action_mask
-        )
-        action_log_prob = tf.cast(action_log_prob, tf.float32)
-        if self._log_prob_clipping > 0.0:
-            action_log_prob = tf.clip_by_value(
-                action_log_prob, -self._log_prob_clipping, self._log_prob_clipping
-            )
-        if self._check_numerics:
-            action_log_prob = tf.debugging.check_numerics(
-                action_log_prob, "action_log_prob"
-            )
-
-        # Prepare both clipped and unclipped importance ratios.
-        importance_ratio = tf.exp(action_log_prob - sample_action_log_probs)
-        importance_ratio_clipped = tf.clip_by_value(
-            importance_ratio,
-            1 - self._importance_ratio_clipping,
-            1 + self._importance_ratio_clipping,
-        )
-
-        if self._check_numerics:
-            importance_ratio = tf.debugging.check_numerics(
-                importance_ratio, "importance_ratio"
-            )
-            if self._importance_ratio_clipping > 0.0:
-                importance_ratio_clipped = tf.debugging.check_numerics(
-                    importance_ratio_clipped, "importance_ratio_clipped"
-                )
-
-        # Pessimistically choose the minimum objective value for clipped and
-        #     unclipped importance ratios.
-        per_timestep_objective = importance_ratio * advantages
-        per_timestep_objective_clipped = importance_ratio_clipped * advantages
-        per_timestep_objective_min = tf.minimum(
-            per_timestep_objective, per_timestep_objective_clipped
-        )
-
-        if self._importance_ratio_clipping > 0.0:
-            policy_gradient_loss = -per_timestep_objective_min
-        else:
-            policy_gradient_loss = -per_timestep_objective
-
-        if self._aggregate_losses_across_replicas:
-            policy_gradient_loss = common.aggregate_losses(
-                per_example_loss=policy_gradient_loss, sample_weight=weights
-            ).total_loss
-        else:
-            policy_gradient_loss = tf.math.reduce_mean(policy_gradient_loss * weights)
-
-        if self._importance_ratio_clipping > 0.0:
-            self._clip_fraction = tf.reduce_mean(
-                input_tensor=tf.cast(
-                    tf.greater(
-                        tf.abs(importance_ratio - 1.0),
-                        self._importance_ratio_clipping,
-                    ),
-                    tf.float32,
-                )
-            )
-
-        if debug_summaries:
-            if self._importance_ratio_clipping > 0.0:
-                tf.compat.v2.summary.scalar(
-                    name="clip_fraction",
-                    data=self._clip_fraction,
-                    step=self.train_step_counter,
-                )
-            tf.compat.v2.summary.scalar(
-                name="importance_ratio_mean",
-                data=tf.reduce_mean(input_tensor=importance_ratio),
-                step=self.train_step_counter,
-            )
-            entropy = self.entropy(
-                current_policy_distribution, self.action_spec, mask=action_mask
-            )
-            tf.compat.v2.summary.scalar(
-                name="policy_entropy_mean",
-                data=tf.reduce_mean(input_tensor=entropy),
-                step=self.train_step_counter,
-            )
-            # TODO(b/171573175): remove the condition once histograms are supported
-            # on TPUs.
-            if not tf.config.list_logical_devices("TPU"):
-                tf.compat.v2.summary.histogram(
-                    name="action_log_prob",
-                    data=action_log_prob,
-                    step=self.train_step_counter,
-                )
-                tf.compat.v2.summary.histogram(
-                    name="action_log_prob_sample",
-                    data=sample_action_log_probs,
-                    step=self.train_step_counter,
-                )
-                tf.compat.v2.summary.histogram(
-                    name="importance_ratio",
-                    data=importance_ratio,
-                    step=self.train_step_counter,
-                )
-                tf.compat.v2.summary.histogram(
-                    name="importance_ratio_clipped",
-                    data=importance_ratio_clipped,
-                    step=self.train_step_counter,
-                )
-                tf.compat.v2.summary.histogram(
-                    name="per_timestep_objective",
-                    data=per_timestep_objective,
-                    step=self.train_step_counter,
-                )
-                tf.compat.v2.summary.histogram(
-                    name="per_timestep_objective_clipped",
-                    data=per_timestep_objective_clipped,
-                    step=self.train_step_counter,
-                )
-                tf.compat.v2.summary.histogram(
-                    name="per_timestep_objective_min",
-                    data=per_timestep_objective_min,
-                    step=self.train_step_counter,
-                )
-
-                tf.compat.v2.summary.histogram(
-                    name="policy_entropy", data=entropy, step=self.train_step_counter
-                )
-                for i, (single_action, single_distribution) in enumerate(
-                    zip(
-                        tf.nest.flatten(self.action_spec),
-                        tf.nest.flatten(current_policy_distribution),
-                    )
-                ):
-                    # Categorical distribution (used for discrete actions) doesn't have a
-                    # mean.
-                    distribution_index = "_{}".format(i) if i > 0 else ""
-                    if not tensor_spec.is_discrete(single_action):
-                        tf.compat.v2.summary.histogram(
-                            name="actions_distribution_mean" + distribution_index,
-                            data=single_distribution.mean(),
-                            step=self.train_step_counter,
-                        )
-                        tf.compat.v2.summary.histogram(
-                            name="actions_distribution_stddev" + distribution_index,
-                            data=single_distribution.stddev(),
-                            step=self.train_step_counter,
-                        )
-                tf.compat.v2.summary.histogram(
-                    name="policy_gradient_loss",
-                    data=policy_gradient_loss,
-                    step=self.train_step_counter,
-                )
-
-        if self._check_numerics:
-            policy_gradient_loss = tf.debugging.check_numerics(
-                policy_gradient_loss, "policy_gradient_loss"
-            )
-
-        return policy_gradient_loss
-
-    def kl_penalty_loss(
-        self,
-        time_steps: ts.TimeStep,
-        action_distribution_parameters: types.NestedTensor,
-        current_policy_distribution: types.NestedDistribution,
-        weights: types.Tensor,  # type: ignore
-        debug_summaries: bool = False,
-    ) -> types.Tensor:  # type: ignore
-        """Compute a loss that penalizes policy steps with high KL."""
-        outer_dims = list(
-            range(nest_utils.get_outer_rank(time_steps, self.time_step_spec))
-        )
-
-        old_actions_distribution = ppo_utils.distribution_from_spec(
-            self._action_distribution_spec,
-            action_distribution_parameters,
-            legacy_distribution_network=isinstance(
-                self._actor_net, network.DistributionNetwork
-            ),
-        )
-
-        # Generar y ajustar la máscara
-        _, availability_indicator = self._observation_and_action_constraint_splitter(
-            time_steps.observation
-        )
-        mask = tf.cast(availability_indicator, tf.float32)
-
-        kl_divergence = self.nested_kl_divergence(
-            old_actions_distribution,
-            current_policy_distribution,
-            outer_dims=outer_dims,
-            mask=mask,
-        )
-        kl_divergence *= weights
-
-        # TODO(b/171573175): remove the condition once histograms are supported
-        # on TPUs.
-        if debug_summaries and not tf.config.list_logical_devices("TPU"):
-            tf.compat.v2.summary.histogram(
-                name="kl_divergence", data=kl_divergence, step=self.train_step_counter
-            )
-
-        kl_cutoff_loss = self.kl_cutoff_loss(kl_divergence, debug_summaries)
-        adaptive_kl_loss = self.adaptive_kl_loss(kl_divergence, debug_summaries)
-        return tf.add(kl_cutoff_loss, adaptive_kl_loss, name="kl_penalty_loss")
-
 
 def create_ppo_agent(
     train_env: TFPyEnvironment, npt_run: Run, rnn=True, learning_rate=1e-3
@@ -1169,15 +399,15 @@ def create_ppo_agent(
     train_step_counter = tf.Variable(0, dtype=tf.int64)
 
     if rnn:
-        actor_net = create_actor_rnn_net(
+        actor_net = ppo_networks.create_actor_rnn_net(
             train_env.observation_spec(), train_env.action_spec()
         )
-        value_net = create_value_rnn_net(train_env.observation_spec())
+        value_net = ppo_networks.create_value_rnn_net(train_env.observation_spec())
     else:
-        actor_net = create_actor_net(
+        actor_net = ppo_networks.create_actor_net(
             train_env.observation_spec(), train_env.action_spec()
         )
-        value_net = create_value_net(train_env.observation_spec())
+        value_net = ppo_networks.create_value_net(train_env.observation_spec())
 
     agent = PPOAgentMasked(
         time_step_spec=train_env.time_step_spec(),
@@ -1198,16 +428,42 @@ def create_ppo_agent(
 
     summary = {}
     with io.StringIO() as s:
+        # Guardar líneas procesadas
+        seen_lines = {}
+
+        def custom_print_fn(x, **kwargs):
+            # Detectar patrones que representan cabezas repetitivas
+            if "CategoricalProjectionNetwork" in x:
+                if x not in seen_lines:
+                    seen_lines[x] = 1
+                else:
+                    seen_lines[x] += 1
+            else:
+                # Escribir cualquier línea que no sea parte de las cabezas repetidas
+                s.write(x + "\n")
+
+        # Generar el resumen del modelo
         layer_utils.print_summary(
             actor_net,
-            print_fn=lambda x, **kwargs: s.write(x + "\n"),
+            line_length=100
+            print_fn=custom_print_fn,
             expand_nested=True,
         )
+
+        # Agregar un resumen de las cabezas repetidas
+        for line, count in seen_lines.items():
+            if count > 1:
+                # Compactar el bloque repetido
+                s.write(f"{line.strip()} (repeated {count} times)\n")
+            else:
+                s.write(line + "\n")
+
         model_summary = s.getvalue()
     summary["agent/actor_model"] = model_summary
     with io.StringIO() as s:
         layer_utils.print_summary(
             value_net,
+            line_length=100
             print_fn=lambda x, **kwargs: s.write(x + "\n"),
             expand_nested=True,
         )

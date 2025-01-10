@@ -687,7 +687,7 @@ class PE_PredictionsAI(ct.Structure):
         ("constel", ct.c_uint32),
         ("sat_id", ct.c_int32),
         ("freq", ct.c_double),
-        ("prediction", ct.c_double),
+        ("prediction", ct.c_bool),
         ("usable", ct.c_bool),
     ]
 
