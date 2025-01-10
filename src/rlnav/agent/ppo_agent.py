@@ -445,7 +445,7 @@ def create_ppo_agent(
         # Generar el resumen del modelo
         layer_utils.print_summary(
             actor_net,
-            line_length=100
+            line_length=100,
             print_fn=custom_print_fn,
             expand_nested=True,
         )
@@ -463,7 +463,7 @@ def create_ppo_agent(
     with io.StringIO() as s:
         layer_utils.print_summary(
             value_net,
-            line_length=100
+            line_length=100,
             print_fn=lambda x, **kwargs: s.write(x + "\n"),
             expand_nested=True,
         )

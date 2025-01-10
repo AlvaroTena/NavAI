@@ -160,6 +160,19 @@ class RewardManager:
 
         rewardRec.reset(gen_output)
 
+    def limit_epochs(self, initial_epoch: GPS_Time, final_epoch: GPS_Time):
+        initial_epoch = pd.to_datetime(
+            initial_epoch.calendar_column_str_d(),
+            format="%Y %m %d %H %M %S.%f",
+        )
+        final_epoch = pd.to_datetime(
+            final_epoch.calendar_column_str_d(),
+            format="%Y %m %d %H %M %S.%f",
+        )
+
+        self.initial_epoch = initial_epoch
+        self.final_epoch = final_epoch
+
     def load_reference(self, filename, ref_mode, ref_type):
         self.__init__(self._log_npt)
         self.refMgr.reset(ref_mode, ref_type)
@@ -167,21 +180,43 @@ class RewardManager:
 
         self.reference_data = self.refMgr.reference
 
-        self.ref_positions = self.reference_data[["Latitude", "Longitude"]]
+        ref_positions = self.reference_data[["Epoch", "Latitude", "Longitude"]]
+        ref_positions.set_index("Epoch", inplace=True)
+        self.ref_positions = ref_positions
 
     def load_baseline(self, filename):
         self.base_data = pd.read_parquet(filename)
-        self.base_positions = self.base_data[["LAT_PROP", "LON_PROP"]]
+        base_data = self.base_data[["RawEpoch", "LAT_PROP", "LON_PROP"]]
+        base_data.set_index("RawEpoch", inplace=True)
+        self.base_positions = base_data
 
-        if self._log_npt.exists(f"training/train/PE_Errors"):
+        self.log_baseline(self.base_data)
+
+    def limit_baseline_log(self, initial_epoch: GPS_Time, final_epoch: GPS_Time):
+        initial_epoch = pd.to_datetime(
+            initial_epoch.calendar_column_str_d(),
+            format="%Y %m %d %H %M %S.%f",
+        )
+        final_epoch = pd.to_datetime(
+            final_epoch.calendar_column_str_d(),
+            format="%Y %m %d %H %M %S.%f",
+        )
+
+        baseline = self.base_data[
+            self.base_data["RawEpoch"].between(initial_epoch, final_epoch)
+        ]
+        self.log_baseline(baseline)
+
+    def log_baseline(self, baseline, truncate=True):
+        if truncate and self._log_npt.exists(f"training/train/PE_Errors"):
             del self._log_npt[f"training/train/PE_Errors"]
 
         pe_errors = {
-            "NorthError": self.base_data["NorthErrorProp"],
-            "EastError": self.base_data["EastErrorProp"],
-            "UpError": self.base_data["UpErrorProp"],
-            "HorizontalError": self.base_data["HorizontalErrorProp"],
-            "VerticalError": self.base_data["VerticalErrorProp"],
+            "NorthError": baseline["NorthErrorProp"],
+            "EastError": baseline["EastErrorProp"],
+            "UpError": baseline["UpErrorProp"],
+            "HorizontalError": baseline["HorizontalErrorProp"],
+            "VerticalError": baseline["VerticalErrorProp"],
         }
         if self._log_npt is not None and self._log_npt._mode != "debug":
             self._log_npt[f"training/{self.scenario}/PE"].extend(
@@ -204,9 +239,9 @@ class RewardManager:
 
         if pe_ref_df is not None:
             self.base_data = self._get_error_position_ref_span(pe_ref_df)
-            self.base_positions = pd.concat(
-                [self.base_positions, self.base_data[["LAT_PROP", "LON_PROP"]]]
-            )
+            base_positions = self.base_data[["RawEpoch", "LAT_PROP", "LON_PROP"]]
+            base_positions.set_index("RawEpoch", inplace=True)
+            self.base_positions = pd.concat([self.base_positions, base_positions])
 
             if self._log_npt.exists(f"training/train/PE_Errors"):
                 del self._log_npt[f"training/train/PE_Errors"]
@@ -238,9 +273,9 @@ class RewardManager:
 
             if ai_ref_df is not None and not pe_ref_df.empty:
                 ai_ref_df = self._get_error_position_ref_span(ai_ref_df)
-                self.ai_positions = pd.concat(
-                    [self.ai_positions, ai_ref_df[["LAT_PROP", "LON_PROP"]]]
-                )
+                ai_positions = ai_ref_df[["RawEpoch", "LAT_PROP", "LON_PROP"]]
+                ai_positions.set_index("RawEpoch", inplace=True)
+                self.ai_positions = pd.concat([self.ai_positions, ai_positions])
 
                 pe_rmse = self._calculate_rmse(
                     pe_ref_df["NorthErrorProp"],
@@ -614,13 +649,36 @@ class RewardManager:
         self.ai_group = folium.FeatureGroup(name="AI Path").add_to(self.map)
 
         # Create and add the reference and base paths
+        ref_positions = self.ref_positions
+        if hasattr(self, "initial_epoch") and hasattr(self, "final_epoch"):
+            ref_positions = ref_positions[
+                ref_positions.index.isin(
+                    self.ref_positions[
+                        self.ref_positions.index.to_series().between(
+                            self.initial_epoch, self.final_epoch
+                        )
+                    ].index
+                )
+            ]
         self.ref_polyline = folium.PolyLine(
-            self.ref_positions.values.tolist(),
+            ref_positions.values.tolist(),
             color="blue",
             weight=2.5,
             opacity=1,
             tooltip="Reference Path",
         ).add_to(self.ref_group)
+
+        base_positions = self.base_positions
+        if hasattr(self, "initial_epoch") and hasattr(self, "final_epoch"):
+            base_positions = base_positions[
+                base_positions.index.isin(
+                    self.base_positions[
+                        self.base_positions.index.to_series().between(
+                            self.initial_epoch, self.final_epoch
+                        )
+                    ].index
+                )
+            ]
 
         self.base_polyline = folium.PolyLine(
             self.base_positions.values.tolist(),
