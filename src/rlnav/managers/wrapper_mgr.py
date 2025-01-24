@@ -4,17 +4,14 @@ import os
 import shutil
 import time
 
-import numpy as np
 import pewrapper.misc.parser_utils as parser_utils
 from navutils.logger import Logger
 from neptune import Run
 from pewrapper.api.common_api_types import Log_Handle, LogCategoryPE
 from pewrapper.managers import configuration_mgr, wrapper_data_mgr
-from pewrapper.misc.version_wrapper_bin import RELEASE_INFO, about_msg
 from pewrapper.types.gps_time_wrapper import GPS_Time
 from rlnav.env.wrapper import RLWrapper
 from rlnav.managers import reward_mgr
-from rlnav.recorder.reward_recorder import RewardRecorder
 from rlnav.types.reference_types import ReferenceMode, ReferenceType
 from rlnav.types.utils import get_parent_scenario_name, is_scenario_subset
 
@@ -49,8 +46,8 @@ class WrapperManager:
         priority_scen,
         scenarios_subset,
         output_path,
-        npt_run: Run,
         rewardMgr: reward_mgr.RewardManager,
+        npt_run: Run,
         num_generations=5,
     ):
         if os.path.exists(scenarios_path):
@@ -124,21 +121,12 @@ class WrapperManager:
         )
         self.rewardMgr = rewardMgr
 
-        self.ai_wrapper = RLWrapper(
-            self.configMgr,
-            self.wrapper_data,
-            self.rewardMgr,
-            use_AI=True,
-        )
         self.pe_wrapper = RLWrapper(
             self.configMgr,
             self.wrapper_data,
             self.rewardMgr,
             use_AI=False,
         )
-        self.prev_ai_epoch = GPS_Time()
-
-        self.reward_rec = RewardRecorder("")
 
         self.scenario_it = iter(self.scenarios)
         self.scenario = next(self.scenario_it)
@@ -154,7 +142,6 @@ class WrapperManager:
     def get_times(self):
         times = copy.deepcopy(self._times)
         self.reset_times()
-        times.update({"AI": self.ai_wrapper.get_times()})
         times.update({"noAI": self.pe_wrapper.get_times()})
         return times
 
@@ -233,13 +220,10 @@ class WrapperManager:
             logs_npt["generation"] = self.scenario_generation[self.scenario]
             output_path = os.path.join(self.output_path, self.scenario)
             self.rewardMgr.next_generation(
-                self.reward_rec,
                 output_path,
                 self.scenario,
                 self.scenario_generation[self.scenario],
             )
-
-        self._init_wrappers(addInfo)
         self._log_npt["training"] = logs_npt
         self._times[f"{time_dst}"].append(time.time() - start)
 
@@ -310,12 +294,6 @@ class WrapperManager:
         self.wrapper_data.reset(initial_epoch_session, final_epoch_session)
 
         self.rewardMgr.load_reference(reference_file_path, ref_mode, ref_type)
-        self.rewardMgr.set_output_path(
-            self.reward_rec,
-            output_path,
-            self.scenario,
-            self.scenario_generation[self.scenario],
-        )
 
         self._copy_files_from_scenario(
             session_path,
@@ -359,31 +337,38 @@ class WrapperManager:
 
         _, addInfo = result
 
-        os.makedirs(
-            (
-                output_noai := self.configMgr.get_config(
-                    use_ai_multipath=False
-                ).log_path.decode("utf-8")
-            ),
-            exist_ok=True,
-        )
-
         baseline_file_path = os.path.join(
             scenario_path, "INPUTS/AI/PE_Baseline.parquet"
         )
 
         if not os.path.isfile(baseline_file_path):
-            if not self.pe_wrapper.process_scenario(None, None, output_noai, None):
+            os.makedirs(
+                (
+                    output_noai := self.configMgr.get_config(
+                        use_ai_multipath=False
+                    ).log_path.decode("utf-8")
+                ),
+                exist_ok=True,
+            )
+            if not (
+                result := self.pe_wrapper.process_scenario(
+                    None, None, output_noai, None
+                )
+            )[0]:
                 Logger.log_message(
                     Logger.Category.ERROR,
                     Logger.Module.MAIN,
                     f"Error processing scenario",
                 )
+            _, pe_errors = result
+            if pe_errors is not None:
+                self._log_baseline_errors(pe_errors)
 
             self.rewardMgr.save_baseline(baseline_file_path)
 
         else:
-            self.rewardMgr.load_baseline(baseline_file_path)
+            pe_errors = self.rewardMgr.load_baseline(baseline_file_path)
+            self._log_baseline_errors(pe_errors)
 
     def _init_subscenario(self, parent_scenario_name):
         scenario_path = os.path.join(self.scenarios_path, parent_scenario_name)
@@ -444,13 +429,13 @@ class WrapperManager:
         self.wrapper_data.reset_epochs(initial_epoch, final_epoch)
 
         self.rewardMgr.set_output_path(
-            self.reward_rec,
             output_path,
             self.scenario,
             self.scenario_generation[self.scenario],
         )
         self.rewardMgr.limit_epochs(initial_epoch, final_epoch)
-        self.rewardMgr.limit_baseline_log(initial_epoch, final_epoch)
+        pe_errors = self.rewardMgr.limit_baseline_log(initial_epoch, final_epoch)
+        self._log_baseline_errors(pe_errors)
 
         self._copy_files_from_scenario(
             session_path,
@@ -518,17 +503,7 @@ class WrapperManager:
             )
 
     def close_PE(self):
-        self.close_ai_wrapper()
         self.close_pe_wrapper()
-
-    def close_ai_wrapper(self):
-        if not self.ai_wrapper.close_PE():
-            Logger.log_message(
-                Logger.Category.ERROR,
-                Logger.Module.MAIN,
-                f"Error closing files of PE: ",
-                use_AI=True,
-            )
 
     def close_pe_wrapper(self):
         if not self.pe_wrapper.close_PE():
@@ -539,114 +514,14 @@ class WrapperManager:
                 use_AI=True,
             )
 
-    def _init_log(self):
-        self.ai_pe_wrapper_commit_id = about_msg()
+    def _log_baseline_errors(self, pe_errors):
+        if self._log_npt.exists(f"training/train/PE_Errors"):
+            del self._log_npt[f"training/train/PE_Errors"]
 
-        if not (result := self.ai_wrapper._get_common_lib_commit_id())[0]:
-            raise ReferenceError("AI_Wrapper")
-        _, ai_common_lib_commit_id = result
-
-        Logger.log_message(
-            Logger.Category.INFO,
-            Logger.Module.MAIN,
-            f"{RELEASE_INFO}, Commit ID PE_Wrapper: {self.ai_pe_wrapper_commit_id}, {ai_common_lib_commit_id}, started",
-            use_AI=True,
-        )
-
-        self.common_lib_commit_id = ai_common_lib_commit_id.split(" ")[-1]
-
-    def _init_wrappers(self, addInfo):
-        os.makedirs(
-            (
-                output_ai := self.configMgr.get_config(
-                    use_ai_multipath=True,
-                    generation=self.scenario_generation[self.scenario],
-                ).log_path.decode("utf-8")
-            ),
-            exist_ok=True,
-        )
-        self.prev_ai_epoch = GPS_Time()
-        self.close_ai_wrapper()
-        self.ai_wrapper.reset(
-            self.configMgr,
-            self.wrapper_data,
-            self.rewardMgr,
-            True,
-            (
-                self.scenario_generation[self.scenario]
-                if self.num_generations > 1
-                else None
-            ),
-        )
-        self._init_log()
-        self.reward_rec.initialize(self.wrapper_data.initial_epoch)
-        if not self.ai_wrapper._start_processing(
-            output_ai,
-            self.ai_pe_wrapper_commit_id,
-            self.common_lib_commit_id,
-        ):
-            Logger.log_message(
-                Logger.Category.ERROR,
-                Logger.Module.MAIN,
-                f"Error processing PE: {addInfo}",
-                use_AI=True,
+        if self._log_npt is not None and self._log_npt._mode != "debug":
+            self._log_npt[f"training/{self.scenario}/PE"].extend(
+                {k: v.to_list() for k, v in pe_errors.items()}
             )
-            self.close_PE()
-            raise RuntimeError
-
-    def process_epochs(self):
-        if not (result := self.ai_wrapper.process_epoch())[0]:
-            _, ai_state, _ = result
-            Logger.log_message(
-                Logger.Category.ERROR,
-                Logger.Module.MAIN,
-                f"Error processing PE: {ai_state}",
-                use_AI=True,
+            self._log_npt[f"training/train/PE_Errors"].extend(
+                {k: v.to_list() for k, v in pe_errors.items()}
             )
-            return False
-
-        _, ai_state, ai_pvt = result
-        ai_epoch = GPS_Time(w=ai_pvt.timestamp_week, s=ai_pvt.timestamp_second)
-
-        if self.prev_ai_epoch > ai_epoch:
-            Logger.log_message(
-                Logger.Category.ERROR,
-                Logger.Module.MAIN,
-                f"AI_Wrapper processed old epoch: {ai_epoch.calendar_column_str_d()} | Prev epoch: {self.prev_ai_epoch.calendar_column_str_d()}",
-                use_AI=True,
-            )
-
-        self.prev_ai_epoch = ai_epoch
-
-        if ai_state == "finished_wrapper":
-            self.reward_rec.close()
-            return True
-
-        elif ai_state == "action_needed":
-            return self.ai_wrapper.get_features_AI()
-
-        else:
-            return False
-
-    def compute(self, predictions: np.ndarray = None):
-        if predictions is not None:
-            if not self.ai_wrapper.load_predictions_AI(self.prev_ai_epoch, predictions):
-                Logger.log_message(
-                    Logger.Category.ERROR,
-                    Logger.Module.MAIN,
-                    f"Error loading predictions",
-                    use_AI=True,
-                )
-                return False, None
-
-        if not (result := self.ai_wrapper.compute())[0]:
-            Logger.log_message(
-                Logger.Category.ERROR,
-                Logger.Module.MAIN,
-                f"Error processing PE: ",
-                use_AI=True,
-            )
-            return False, None
-        _, ai_output = result
-
-        return True, ai_output

@@ -3,7 +3,6 @@ import os
 import time
 
 import folium
-import neptune
 import numpy as np
 import pandas as pd
 import pyproj
@@ -73,7 +72,7 @@ class RunningDiffMetric(RunningMetric):
 
 
 class RewardManager:
-    def __init__(self, npt_run: neptune.Run):
+    def __init__(self):
         self.refMgr = ReferenceDataManager(
             ReferenceMode.KINEMATIC, ReferenceType.Kinematic.SPAN_FILE
         )
@@ -89,7 +88,6 @@ class RewardManager:
         self.scenario = ""
         self.generation = 1
         self.output_path = ""
-        self._log_npt = npt_run
         self.reset_times()
 
         self.reward = RunningDiffMetric(decay=0.9)
@@ -98,20 +96,16 @@ class RewardManager:
         self.pe_rmse_values = RunningDiffMetric(window_size=-1)
         self.rmse_patience = 0
 
-        if self._log_npt.exists(f"training/train/instant_running_reward"):
-            del self._log_npt[f"training/train/instant_running_reward"]
-        if self._log_npt.exists(f"training/train/instant_reward"):
-            del self._log_npt[f"training/train/instant_reward"]
-        if self._log_npt.exists(f"training/train/cummulative_reward"):
-            del self._log_npt[f"training/train/cummulative_reward"]
+        self.reward_rec = RewardRecorder("")
 
-    def next_generation(
-        self,
-        rewardRec: RewardRecorder,
-        output_path,
-        scenario,
-        generation,
-    ):
+        self.log_data = {
+            "ai_errors": [],
+            "instant_rewards": [],
+            "running_rewards": [],
+            "cummulative_rewards": [],
+        }
+
+    def next_generation(self):
         self.ai_data = pd.DataFrame()
         self.map_initialized = False
         self.ai_positions = pd.DataFrame(columns=["LAT_PROP", "LON_PROP"])
@@ -123,18 +117,6 @@ class RewardManager:
         self.pe_rmse_values.reset()
         self.rmse_patience = 0
 
-        self.set_output_path(rewardRec, output_path, scenario, generation)
-
-        if self._log_npt.exists(f"training/train/AI_Errors"):
-            del self._log_npt[f"training/train/AI_Errors"]
-
-        if self._log_npt.exists(f"training/train/instant_running_reward"):
-            del self._log_npt[f"training/train/instant_running_reward"]
-        if self._log_npt.exists(f"training/train/instant_reward"):
-            del self._log_npt[f"training/train/instant_reward"]
-        if self._log_npt.exists(f"training/train/cummulative_reward"):
-            del self._log_npt[f"training/train/cummulative_reward"]
-
     def reset_times(self):
         self._times = {"compute_reward": []}
 
@@ -145,7 +127,6 @@ class RewardManager:
 
     def set_output_path(
         self,
-        rewardRec: RewardRecorder,
         output_path,
         scenario,
         generation,
@@ -158,7 +139,7 @@ class RewardManager:
         self.scenario = scenario
         self.generation = generation
 
-        rewardRec.reset(gen_output)
+        self.reward_rec.reset(gen_output)
 
     def limit_epochs(self, initial_epoch: GPS_Time, final_epoch: GPS_Time):
         initial_epoch = pd.to_datetime(
@@ -174,7 +155,7 @@ class RewardManager:
         self.final_epoch = final_epoch
 
     def load_reference(self, filename, ref_mode, ref_type):
-        self.__init__(self._log_npt)
+        self.__init__()
         self.refMgr.reset(ref_mode, ref_type)
         self.refMgr.parse_ref_data(filename)
 
@@ -190,7 +171,7 @@ class RewardManager:
         base_data.set_index("RawEpoch", inplace=True)
         self.base_positions = base_data
 
-        self.log_baseline(self.base_data)
+        return self.log_baseline(self.base_data)
 
     def limit_baseline_log(self, initial_epoch: GPS_Time, final_epoch: GPS_Time):
         initial_epoch = pd.to_datetime(
@@ -205,12 +186,9 @@ class RewardManager:
         baseline = self.base_data[
             self.base_data["RawEpoch"].between(initial_epoch, final_epoch)
         ]
-        self.log_baseline(baseline)
+        return self.log_baseline(baseline)
 
-    def log_baseline(self, baseline, truncate=True):
-        if truncate and self._log_npt.exists(f"training/train/PE_Errors"):
-            del self._log_npt[f"training/train/PE_Errors"]
-
+    def log_baseline(self, baseline):
         pe_errors = {
             "NorthError": baseline["NorthErrorProp"],
             "EastError": baseline["EastErrorProp"],
@@ -218,13 +196,7 @@ class RewardManager:
             "HorizontalError": baseline["HorizontalErrorProp"],
             "VerticalError": baseline["VerticalErrorProp"],
         }
-        if self._log_npt is not None and self._log_npt._mode != "debug":
-            self._log_npt[f"training/{self.scenario}/PE"].extend(
-                {k: v.to_list() for k, v in pe_errors.items()}
-            )
-            self._log_npt[f"training/train/PE_Errors"].extend(
-                {k: v.to_list() for k, v in pe_errors.items()}
-            )
+        return pe_errors
 
     def save_baseline(self, filename):
         self.base_data.to_parquet(filename)
@@ -243,9 +215,6 @@ class RewardManager:
             base_positions.set_index("RawEpoch", inplace=True)
             self.base_positions = pd.concat([self.base_positions, base_positions])
 
-            if self._log_npt.exists(f"training/train/PE_Errors"):
-                del self._log_npt[f"training/train/PE_Errors"]
-
             pe_errors = {
                 "NorthError": self.base_data["NorthErrorProp"],
                 "EastError": self.base_data["EastErrorProp"],
@@ -253,13 +222,8 @@ class RewardManager:
                 "HorizontalError": self.base_data["HorizontalErrorProp"],
                 "VerticalError": self.base_data["VerticalErrorProp"],
             }
-            if self._log_npt is not None and self._log_npt._mode != "debug":
-                self._log_npt[f"training/{self.scenario}/PE"].extend(
-                    {k: v.to_list() for k, v in pe_errors.items()}
-                )
-                self._log_npt[f"training/train/PE_Errors"].extend(
-                    {k: v.to_list() for k, v in pe_errors.items()}
-                )
+            return pe_errors
+        return None
 
     def compute_reward(self, ai_output: OutputStr):
         start = time.time()
@@ -314,13 +278,7 @@ class RewardManager:
                     "HorizontalError": ai_ref_df["HorizontalErrorProp"].iloc[-1],
                     "VerticalError": ai_ref_df["VerticalErrorProp"].iloc[-1],
                 }
-
-                self._log_npt[
-                    f"training/{self.scenario}/AI_generation{self.generation}"
-                ].extend({k: [v] for k, v in ai_errors.items()})
-                self._log_npt[f"training/train/AI_Errors"].extend(
-                    {k: [v] for k, v in ai_errors.items()}
-                )
+                self.log_data["ai_errors"].append(ai_errors)
 
                 self.ai_rmse_values.update(ai_rmse)
                 self.pe_rmse_values.update(pe_rmse)
@@ -349,27 +307,32 @@ class RewardManager:
 
         self.reward.update(reward)
 
-        running_reward = self.reward.get_running_value()
         instant_reward = self.reward.get_differentiated_value()
+        running_reward = self.reward.get_running_value()
         cummulative_reward = self.reward.get_cummulative_value()
 
         self._times["compute_reward"].append(time.time() - start)
 
-        self._log_npt[f"training/train/instant_running_reward"].append(running_reward)
-        self._log_npt[f"training/train/instant_reward"].append(instant_reward)
-        self._log_npt[f"training/train/cummulative_reward"].append(cummulative_reward)
-
-        self._log_npt[
-            f"training/{self.scenario}/AI_generation{self.generation}/instant_running_reward"
-        ].append(running_reward)
-        self._log_npt[
-            f"training/{self.scenario}/AI_generation{self.generation}/instant_reward"
-        ].append(instant_reward)
-        self._log_npt[
-            f"training/{self.scenario}/AI_generation{self.generation}/cummulative_reward"
-        ].append(cummulative_reward)
+        self.log_data["running_rewards"].append(running_reward)
+        self.log_data["instant_rewards"].append(instant_reward)
+        self.log_data["cummulative_rewards"].append(cummulative_reward)
 
         return self.reward.get_differentiated_value()
+
+    def get_log_data(self):
+        data = self.log_data.copy()
+
+        if "ai_errors" in data and isinstance(data["ai_errors"], list):
+            flattened_ai_errors = {}
+            for error_dict in data["ai_errors"]:
+                for key, value in error_dict.items():
+                    if key not in flattened_ai_errors:
+                        flattened_ai_errors[key] = []
+                    flattened_ai_errors[key].append(value)
+            data["ai_errors"] = flattened_ai_errors
+
+        self.log_data = {key: [] for key in self.log_data}
+        return data
 
     def _get_record_output(self, data: OutputStr) -> pd.DataFrame:
         record = {}
@@ -713,7 +676,6 @@ class RewardManager:
             self.last_ai_position_index = len(self.ai_positions)
 
             self.map.save(self.output_path)
-            self._log_npt[f"training/train/map"].upload(self.output_path)
 
         return self.output_path
 

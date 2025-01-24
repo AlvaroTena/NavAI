@@ -1,3 +1,4 @@
+import ctypes as ct
 import os
 from configparser import ConfigParser
 from typing import Tuple
@@ -57,6 +58,148 @@ class ConfigurationManager(metaclass=Singleton):
         self.IMU_latency_ = 0.0
         self.ODO_latency_ = 0.0
         self.use_IMU_qualifier_ = False
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+
+        config_struct = state["config_info_"]
+
+        config_info = {
+            "parallelize": config_struct.parallelize,
+            "max_num_pe_log_files": config_struct.max_num_pe_log_files,
+            "max_num_wrapper_data_files": state[
+                "config_info_"
+            ].max_num_wrapper_data_files,
+            "log_path": config_struct.log_path.decode("utf-8"),
+            "tracing_config_file": config_struct.tracing_config_file.decode("utf-8"),
+            "algo_profile": config_struct.algo_profile,
+            "doppler_sign": config_struct.doppler_sign,
+            "use_velCore": config_struct.use_velCore,
+            "require_e2e_msg": config_struct.require_e2e_msg,
+            "require_timesync": config_struct.require_timesync,
+            "use_global_iono": config_struct.use_global_iono,
+            "use_iono": config_struct.use_iono,
+            "cn0_threshold_signal_1": config_struct.cn0_threshold_signal_1,
+            "cn0_threshold_signal_2": config_struct.cn0_threshold_signal_2,
+            "Signal_1_GAL": config_struct.Signal_1_GAL,
+            "Signal_2_GAL": config_struct.Signal_2_GAL,
+            "Signal_1_GPS": config_struct.Signal_1_GPS,
+            "Signal_2_GPS": config_struct.Signal_2_GPS,
+            "Signal_1_BDS": config_struct.Signal_1_BDS,
+            "Signal_2_BDS": config_struct.Signal_2_BDS,
+            "gnssProtocol": config_struct.gnssProtocol,
+            "galCorrectionDataType": config_struct.galCorrectionDataType,
+            "use_gps": config_struct.use_gps,
+            "use_gal": config_struct.use_gal,
+            "use_bds": config_struct.use_bds,
+            "use_AI_multipath": config_struct.use_AI_multipath,
+            "use_imu": config_struct.use_imu,
+            "use_wt": config_struct.use_wt,
+            "use_Integrity": config_struct.use_Integrity,
+            "require_CS_integrity": config_struct.require_CS_integrity,
+            "use_qm_variant": config_struct.use_qm_variant,
+            "perform_js_checks": config_struct.perform_js_checks,
+            "imu_2_antenna_lever_arm": list(config_struct.imu_2_antenna_lever_arm),
+            "antenna_2_rear_axle": list(config_struct.antenna_2_rear_axle),
+            "RearWheelDistance": config_struct.RearWheelDistance,
+            "WheelDiameter": config_struct.WheelDiameter,
+            "tile_hysteresis_delta_km": config_struct.tile_hysteresis_delta_km,
+            "doppler_available": config_struct.doppler_available,
+            "max_age_of_corrections": config_struct.max_age_of_corrections,
+            "binEphem_handle": None,
+            "log_handle": None,
+            "log_category": config_struct.log_category,
+            "ReportDTCStatus": None,
+        }
+        if SECURITY:
+            config_info["license_file_path"] = config_struct.license_file_path.decode(
+                "utf-8"
+            )
+
+        state["config_info_"] = config_info
+
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+        serialized_config_info = self.__dict__["config_info_"]
+
+        config_info = Configuration_info(
+            binEphem_handle=parse_binEphem,
+            log_handle=PE_LogWrapper,
+            ReportDTCStatus=DtcManager.ReportDTCStatus,
+        )
+
+        config_info.parallelize = serialized_config_info["parallelize"]
+        config_info.max_num_pe_log_files = serialized_config_info[
+            "max_num_pe_log_files"
+        ]
+        config_info.max_num_wrapper_data_files = serialized_config_info[
+            "max_num_wrapper_data_files"
+        ]
+        config_info.log_path = serialized_config_info["log_path"].encode("utf-8")
+        config_info.tracing_config_file = serialized_config_info[
+            "tracing_config_file"
+        ].encode("utf-8")
+        config_info.algo_profile = serialized_config_info["algo_profile"]
+        config_info.doppler_sign = serialized_config_info["doppler_sign"]
+        config_info.use_velCore = serialized_config_info["use_velCore"]
+        config_info.require_e2e_msg = serialized_config_info["require_e2e_msg"]
+        config_info.require_timesync = serialized_config_info["require_timesync"]
+        config_info.use_global_iono = serialized_config_info["use_global_iono"]
+        config_info.use_iono = serialized_config_info["use_iono"]
+        config_info.cn0_threshold_signal_1 = serialized_config_info[
+            "cn0_threshold_signal_1"
+        ]
+        config_info.cn0_threshold_signal_2 = serialized_config_info[
+            "cn0_threshold_signal_2"
+        ]
+        config_info.Signal_1_GAL = serialized_config_info["Signal_1_GAL"]
+        config_info.Signal_2_GAL = serialized_config_info["Signal_2_GAL"]
+        config_info.Signal_1_GPS = serialized_config_info["Signal_1_GPS"]
+        config_info.Signal_2_GPS = serialized_config_info["Signal_2_GPS"]
+        config_info.Signal_1_BDS = serialized_config_info["Signal_1_BDS"]
+        config_info.Signal_2_BDS = serialized_config_info["Signal_2_BDS"]
+        config_info.gnssProtocol = serialized_config_info["gnssProtocol"]
+        config_info.galCorrectionDataType = serialized_config_info[
+            "galCorrectionDataType"
+        ]
+        config_info.use_gps = serialized_config_info["use_gps"]
+        config_info.use_gal = serialized_config_info["use_gal"]
+        config_info.use_bds = serialized_config_info["use_bds"]
+        config_info.use_AI_multipath = serialized_config_info["use_AI_multipath"]
+        config_info.use_imu = serialized_config_info["use_imu"]
+        config_info.use_wt = serialized_config_info["use_wt"]
+        config_info.use_Integrity = serialized_config_info["use_Integrity"]
+        config_info.require_CS_integrity = serialized_config_info[
+            "require_CS_integrity"
+        ]
+        config_info.use_qm_variant = serialized_config_info["use_qm_variant"]
+        config_info.perform_js_checks = serialized_config_info["perform_js_checks"]
+
+        imu_list = serialized_config_info["imu_2_antenna_lever_arm"]
+        antenna_list = serialized_config_info["antenna_2_rear_axle"]
+        config_info.imu_2_antenna_lever_arm = (ct.c_double * 3)(*imu_list)
+        config_info.antenna_2_rear_axle = (ct.c_double * 3)(*antenna_list)
+
+        config_info.RearWheelDistance = serialized_config_info["RearWheelDistance"]
+        config_info.WheelDiameter = serialized_config_info["WheelDiameter"]
+        config_info.tile_hysteresis_delta_km = serialized_config_info[
+            "tile_hysteresis_delta_km"
+        ]
+        config_info.doppler_available = serialized_config_info["doppler_available"]
+        config_info.max_age_of_corrections = serialized_config_info[
+            "max_age_of_corrections"
+        ]
+        config_info.log_category = serialized_config_info["log_category"]
+
+        if SECURITY and "license_file_path" in serialized_config_info:
+            config_info.license_file_path = serialized_config_info[
+                "license_file_path"
+            ].encode("utf-8")
+
+        self.config_info_ = config_info
 
     def reset(
         self,
@@ -786,7 +929,12 @@ class ConfigurationManager(metaclass=Singleton):
 
         return returnValue, addInfo
 
-    def get_config(self, use_ai_multipath: bool = None, generation: int = None):
+    def get_config(
+        self,
+        base_path: str = None,
+        use_ai_multipath: bool = None,
+        generation: int = None,
+    ) -> Configuration_info:
         config_copy = deepcopy_config(self.config_info_)
         if use_ai_multipath is not None:
             config_copy.use_AI_multipath = use_ai_multipath
@@ -796,8 +944,14 @@ class ConfigurationManager(metaclass=Singleton):
 
                 if generation is not None:
                     path_suffix = f"AI_generation{generation}"
+
                 config_copy.log_path = os.path.join(
-                    config_copy.log_path.decode("utf-8"), path_suffix
+                    (
+                        config_copy.log_path.decode("utf-8")
+                        if base_path is None
+                        else base_path
+                    ),
+                    path_suffix,
                 ).encode("utf-8")
 
             else:

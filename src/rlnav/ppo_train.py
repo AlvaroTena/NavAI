@@ -13,15 +13,14 @@ from navutils.user_interrupt import UserInterruptException, signal_handler
 from neptune_tensorboard import enable_tensorboard_logging
 from pewrapper.misc.version_wrapper_bin import RELEASE_INFO
 from rlnav.agent.ppo_agent import create_ppo_agent
-from rlnav.env.pe_env import PE_Env
+from rlnav.env.pe_env import PE_Env, get_transformers_min_max
 from rlnav.env.wrapper import WrapperDataAttributeError
 from rlnav.managers.reward_mgr import RewardManager
 from rlnav.managers.wrapper_mgr import WrapperManager
 from rlnav.recorder.training_recorder import TrainingRecorder
 from rlnav.types.running_metric import RunningMetric
 from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import tf_py_environment
-from tf_agents.policies import policy_saver
+from tf_agents.environments import parallel_py_environment, tf_py_environment
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
 
@@ -45,61 +44,119 @@ def remove_empty_lists(d):
     return d
 
 
+class EnvCreator:
+    def __init__(
+        self,
+        config,
+        configMgr,
+        wrapper_data,
+        rewardMgr,
+        scenario,
+        generation,
+        min_values,
+        max_values,
+        output_path,
+    ):
+        self.config = config
+        self.configMgr = configMgr
+        self.wrapper_data = wrapper_data
+        self.rewardMgr = rewardMgr
+        self.scenario = scenario
+        self.generation = generation
+        self.min_values = min_values
+        self.max_values = max_values
+        self.output_path = output_path
+
+    def __call__(self):
+        """
+        Este método permite que la clase actúe como una función al ser llamada.
+        """
+        return PE_Env(
+            configMgr=self.configMgr,
+            wrapper_data=self.wrapper_data,
+            rewardMgr=self.rewardMgr,
+            scenario=self.scenario,
+            generation=self.generation,
+            min_values=self.min_values,
+            max_values=self.max_values,
+            transformers_path=self.config.transformed_data.path,
+            window_size=self.config.rnn.window_size if self.config.rnn.enable else 1,
+            output_path=self.output_path,
+        )
+
+
+def create_parallel_environment(
+    config,
+    wrapperMgr,
+    rewardMgr,
+    min_values,
+    max_values,
+    output_path,
+    num_parallel_environments,
+):
+    """
+    Crea un entorno paralelo utilizando ParallelPyEnvironment.
+    """
+    try:
+        env_creators = [
+            EnvCreator(
+                config=config,
+                configMgr=wrapperMgr.configMgr,
+                wrapper_data=wrapperMgr.wrapper_data,
+                rewardMgr=rewardMgr,
+                scenario=wrapperMgr.scenario,
+                generation=wrapperMgr.scenario_generation[wrapperMgr.scenario],
+                min_values=min_values,
+                max_values=max_values,
+                output_path=os.path.join(output_path, f"env_{i}"),
+            )
+            for i in range(num_parallel_environments)
+        ]
+
+        # Crear el entorno paralelo
+        parallel_env = parallel_py_environment.ParallelPyEnvironment(env_creators)
+
+        # Convertir a entorno compatible con TensorFlow
+        return tf_py_environment.TFPyEnvironment(parallel_env)
+    except Exception as e:
+        print(f"Error al inicializar entornos paralelos: {e}")
+        raise
+
+
 def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.Run):
     enable_tensorboard_logging(npt_run)
     config = load_config(config_path)
 
-    rewardMgr = RewardManager(npt_run)
+    baseRewardMgr = RewardManager()
     wrapperMgr = WrapperManager(
         config.scenarios.path,
         (config.scenarios.skip_first, config.scenarios.n_scenarios),
         config.scenarios.priority,
         config.scenarios.subscenarios,
         output_path,
+        baseRewardMgr,
         npt_run,
-        rewardMgr,
         num_generations=config.scenarios.n_generations,
     )
-    pe_env = PE_Env(
-        wrapperMgr=wrapperMgr,
-        rewardMgr=rewardMgr,
+
+    min_values, max_values = get_transformers_min_max(
+        os.path.join(config.transformed_data.path, "transforms")
+    )
+
+    env = PE_Env(
+        configMgr=wrapperMgr.configMgr,
+        wrapper_data=wrapperMgr.wrapper_data,
+        rewardMgr=baseRewardMgr,
+        generation=wrapperMgr.scenario_generation[wrapperMgr.scenario],
+        min_values=min_values,
+        max_values=max_values,
         transformers_path=config.transformed_data.path,
         window_size=config.rnn.window_size if config.rnn.enable else 1,
+        output_path=output_path,
     )
-    train_env = tf_py_environment.TFPyEnvironment(pe_env)
-
-    # Crea el agente.
-    agent = create_ppo_agent(train_env, npt_run, rnn=config.rnn.enable)
-
-    # Configura el replay buffer y el driver.
-    replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
-        data_spec=agent.collect_data_spec,
-        batch_size=train_env.batch_size,
-        max_length=100,
+    agent = create_ppo_agent(
+        tf_py_environment.TFPyEnvironment(env), npt_run, rnn=config.rnn.enable
     )
-
-    driver = dynamic_step_driver.DynamicStepDriver(
-        train_env,
-        agent.collect_policy,
-        observers=[replay_buffer.add_batch],
-        num_steps=100,
-    )
-
-    # Configura el checkpointer.
-    checkpoint_dir = os.path.join(output_path, "checkpoints")
-    train_checkpointer = common.Checkpointer(
-        ckpt_dir=checkpoint_dir,
-        agent=agent,
-        policy=agent.policy,
-        replay_buffer=replay_buffer,
-        global_step=agent.train_step_counter,
-    )
-
-    policy_dir = os.path.join(output_path, "policy")
-    policy_saver = common.Checkpointer(ckpt_dir=policy_dir, policy=agent.collect_policy)
-
-    # Restaurar desde el último checkpoint si existe.
-    train_checkpointer.initialize_or_restore()
 
     early_stopping_threshold = 0.1
     early_stopping_patience = 600
@@ -119,10 +176,73 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
 
     try:
         while wrapperMgr.next_scenario(parsing_rate):
+            scenario = wrapperMgr.scenario
+            generation = wrapperMgr.scenario_generation[scenario]
             scenario_priority = (
-                wrapperMgr.scenario == config.scenarios.priority
-                and wrapperMgr.scenario_generation[wrapperMgr.scenario] == 1
+                wrapperMgr.scenario == config.scenarios.priority and generation == 1
             )
+
+            scenario_logpath = os.path.join(output_path, scenario)
+
+            num_parallel_environments = 5
+
+            train_env = create_parallel_environment(
+                config,
+                wrapperMgr,
+                baseRewardMgr,
+                min_values,
+                max_values,
+                scenario_logpath,
+                num_parallel_environments,
+            )
+
+            for i, sub_env in enumerate(train_env._envs):
+                sub_env.rewardMgr.set_output_path(
+                    os.path.join(scenario_logpath, f"env_{i}"),
+                    scenario,
+                    generation,
+                )
+
+            # Configura el replay buffer y el driver.
+            replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
+                data_spec=agent.collect_data_spec,
+                batch_size=train_env.batch_size,
+                max_length=3000,
+            )
+
+            driver = dynamic_step_driver.DynamicStepDriver(
+                train_env,
+                agent.collect_policy,
+                observers=[replay_buffer.add_batch],
+                num_steps=3000,
+            )
+
+            # Configura el checkpointer.
+            checkpoint_dir = os.path.join(output_path, "checkpoints")
+            train_checkpointer = common.Checkpointer(
+                ckpt_dir=checkpoint_dir,
+                agent=agent,
+                policy=agent.policy,
+                replay_buffer=replay_buffer,
+                global_step=agent.train_step_counter,
+            )
+
+            policy_dir = os.path.join(output_path, "policy")
+            policy_saver = common.Checkpointer(
+                ckpt_dir=policy_dir, policy=agent.collect_policy
+            )
+
+            # Restaurar desde el último checkpoint si existe.
+            train_checkpointer.initialize_or_restore()
+
+            if npt_run.exists(f"training/train/instant_running_reward"):
+                del npt_run[f"training/train/instant_running_reward"]
+            if npt_run.exists(f"training/train/instant_reward"):
+                del npt_run[f"training/train/instant_reward"]
+            if npt_run.exists(f"training/train/cummulative_reward"):
+                del npt_run[f"training/train/cummulative_reward"]
+            if npt_run.exists(f"training/train/AI_Errors"):
+                del npt_run[f"training/train/AI_Errors"]
 
             loss.reset()
             policy_gradient_loss.reset()
@@ -132,23 +252,61 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
             kl_penalty_loss.reset()
             clip_fraction.reset()
 
-            while hasattr(wrapperMgr.ai_wrapper, "wrapper_data"):
+            while not all([sub_env.call("is_done")() for sub_env in train_env._envs]):
                 try:
-                    driver.run()
+                    times = {}
 
                     start = time.time()
-                    # Muestreo de datos del buffer y entrenamiento del agente.
+                    driver.run()
+                    times.update({"envs_collect": [time.time() - start]})
+
+                    start = time.time()
                     experience = replay_buffer.gather_all()
                     train_loss = agent.train(experience)
+                    times.update({"agent_train": [time.time() - start]})
 
-                    times = {}
-                    times["agent_train"] = []
-                    times["agent_train"].append(time.time() - start)
                     times.update(wrapperMgr.get_times())
-                    times.update(pe_env.get_times())
-                    times.update(rewardMgr.get_times())
+                    for i, sub_env in enumerate(train_env._envs):
+                        sub_env_times = sub_env.call("get_times")
+                        times.update({f"env_{i}": sub_env_times()})
                     if config.neptune.monitoring_times:
                         npt_run["monitoring/times"].extend(remove_empty_lists(times))
+
+                    for i, sub_env in enumerate(train_env._envs):
+                        log_data = sub_env.call("get_logging_data")()
+
+                        if "ai_errors" in log_data:
+                            for key, values in log_data["ai_errors"].items():
+                                npt_run[
+                                    f"training/env_{i}/{scenario}/AI_generation{generation}/{key}"
+                                ].extend(values)
+                                npt_run[
+                                    f"training/env_{i}/train/AI_Errors/{key}"
+                                ].extend(values)
+
+                        if "running_rewards" in log_data:
+                            npt_run[
+                                f"training/env_{i}/train/instant_running_reward"
+                            ].extend(log_data["running_rewards"])
+                            npt_run[
+                                f"training/env_{i}/{scenario}/AI_generation{generation}/instant_running_reward"
+                            ].extend(log_data["running_rewards"])
+
+                        if "instant_rewards" in log_data:
+                            npt_run[f"training/env_{i}/train/instant_reward"].extend(
+                                log_data["instant_rewards"]
+                            )
+                            npt_run[
+                                f"training/env_{i}/{scenario}/AI_generation{generation}/instant_reward"
+                            ].extend(log_data["instant_rewards"])
+
+                        if "cummulative_rewards" in log_data:
+                            npt_run[
+                                f"training/env_{i}/train/cummulative_reward"
+                            ].extend(log_data["cummulative_rewards"])
+                            npt_run[
+                                f"training/env_{i}/{scenario}/AI_generation{generation}/cummulative_reward"
+                            ].extend(log_data["cummulative_rewards"])
 
                     loss.update(train_loss.loss.numpy())
                     policy_gradient_loss.update(
@@ -192,7 +350,9 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                     replay_buffer.clear()
 
                     if agent.train_step_counter.numpy() % 10 == 0:
-                        rewardMgr.update_map()
+                        for i, sub_env in enumerate(train_env._envs):
+                            map_file = sub_env.call("update_map")()
+                            npt_run[f"training/env_{i}/train/map"].upload(map_file)
 
                     # Guardar un checkpoint.
                     if agent.train_step_counter.numpy() % 1000 == 0:
@@ -223,19 +383,22 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                 except WrapperDataAttributeError:
                     pass
 
-            map_file = rewardMgr.update_map()
-            npt_run[
-                f"training/{wrapperMgr.scenario}/AI_generation{wrapperMgr.scenario_generation[wrapperMgr.scenario]}/map"
-            ].upload(map_file)
-            npt_run[
-                f"training/{wrapperMgr.scenario}/AI_generation{wrapperMgr.scenario_generation[wrapperMgr.scenario]}/reward"
-            ].upload(wrapperMgr.reward_rec.file_path)
+            for i, sub_env in enumerate(train_env._envs):
+                map_file = sub_env.call("update_map")()
+                npt_run[
+                    f"training/env_{i}/{scenario}/AI_generation{generation}/map"
+                ].upload(map_file)
+                npt_run[
+                    f"training/env_{i}/{scenario}/AI_generation{generation}/reward"
+                ].upload(sub_env.rewardMgr.reward_rec.file_path)
 
             train_checkpointer.save(agent.train_step_counter.numpy())
             for checkpoint_file in os.listdir(checkpoint_dir):
                 npt_run[f"training/agent/checkpoint/{checkpoint_file}"].upload(
                     os.path.join(checkpoint_dir, checkpoint_file)
                 )
+
+            train_env.close()
 
         policy_saver.save(agent.train_step_counter.numpy())
         for policy_file in os.listdir(policy_dir):
@@ -260,7 +423,7 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
         return EXIT_FAILURE
 
 
-def main(argv):
+def main(argv=sys.argv):
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -332,6 +495,12 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    result = main(sys.argv)
+    from absl import logging as absl_logging
+
+    absl_logging.use_python_logging()
+
+    from tf_agents.system import multiprocessing as mp
+
+    result = mp.handle_main(main)
 
     sys.exit(result)
