@@ -54,12 +54,11 @@ class PE_Env(py_environment.PyEnvironment):
 
         self.transformers_path = transformers_path
 
-        self._action_spec = array_spec.BoundedArraySpec(
-            shape=(pe_const.MAX_SATS * pe_const.NUM_CHANNELS,),
-            dtype=np.float32,
-            minimum=[0.5],
-            maximum=[15.0],
-            name="action",
+        self._action_spec = tuple(
+            array_spec.BoundedArraySpec(
+                shape=(), dtype=np.int32, minimum=0, maximum=1, name=f"action_{i}"
+            )
+            for i in range(pe_const.MAX_SATS * pe_const.NUM_CHANNELS)
         )
         min_values, max_values = get_transformers_min_max(
             os.path.join(transformers_path, "transforms")
@@ -139,12 +138,8 @@ class PE_Env(py_environment.PyEnvironment):
         if self._episode_ended:
             return self._reset()
 
-        invalid_mask = np.logical_or(
-            action < self._action_spec.minimum, action > self._action_spec.maximum
-        )
-
+        action = np.array(action, dtype=np.bool_)
         validity = self._state[:, 0]
-        validity = np.where(invalid_mask.squeeze(), 0, validity)
 
         action = np.concatenate(
             (validity[..., np.newaxis], action[..., np.newaxis]), axis=-1

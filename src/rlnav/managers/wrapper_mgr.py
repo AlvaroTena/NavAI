@@ -449,6 +449,8 @@ class WrapperManager:
             self.scenario,
             self.scenario_generation[self.scenario],
         )
+        self.rewardMgr.limit_epochs(initial_epoch, final_epoch)
+        self.rewardMgr.limit_baseline_log(initial_epoch, final_epoch)
 
         self._copy_files_from_scenario(
             session_path,
