@@ -1,6 +1,5 @@
 [core]
-    remote = gdrive
-['remote "gdrive"']
-    url = gdrive://11iQldEZOsHOQH1TBwiEXz-_J2PO06em5
-    gdrive_acknowledge_abuse = true
-    gdrive_client_id = 701190835533-d9a7rmvq6ola6h509i1213uatir3rhko.apps.googleusercontent.com
+    remote = aws_bucket
+['remote "aws_bucket"']
+    url = s3://gnss-batch/PE
+    region = eu-west-3
