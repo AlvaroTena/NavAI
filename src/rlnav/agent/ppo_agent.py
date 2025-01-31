@@ -2,11 +2,9 @@ import io
 from collections import Counter
 from typing import Optional, Text, Tuple
 
-import rlnav.networks.ppo_networks as ppo_networks
 import tensorflow as tf
 from absl import logging
 from neptune import Run
-from rlnav.agent.ppo_policy import PPOPolicyMasked
 from tf_agents.agents import data_converter
 from tf_agents.agents.ppo import ppo_agent
 from tf_agents.environments import TFPyEnvironment
@@ -16,6 +14,9 @@ from tf_agents.specs import tensor_spec
 from tf_agents.trajectories import time_step as ts
 from tf_agents.typing import types
 from tf_agents.utils import common, tensor_normalizer
+
+import rlnav.networks.ppo_networks as ppo_networks
+from rlnav.agent.ppo_policy import PPOPolicyMasked
 
 
 def build_mask_for_heads(mask_bin):
@@ -511,9 +512,6 @@ def create_ppo_agent(
         )
         model_summary = s.getvalue()
     summary["agent/actor_model"] = unify_repeated_cat_proj(model_summary)
-
-    with open("actor_model_summary.txt", "w") as f:
-        f.write(model_summary)
 
     with io.StringIO() as s:
         layer_utils.print_summary(

@@ -5,6 +5,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
+from tf_agents.environments import py_environment
+from tf_agents.specs import array_spec
+from tf_agents.trajectories import time_step as ts
+
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
 from navutils.logger import Logger
@@ -14,9 +18,6 @@ from pewrapper.types.gps_time_wrapper import GPS_Time
 from rlnav.data.dataset import RLDataset
 from rlnav.env.wrapper import RLWrapper
 from rlnav.managers.reward_mgr import RewardManager
-from tf_agents.environments import py_environment
-from tf_agents.specs import array_spec
-from tf_agents.trajectories import time_step as ts
 
 ELEV_THRES = 30
 MIN_ELEV = 5
@@ -107,7 +108,7 @@ class PE_Env(py_environment.PyEnvironment):
         self.reset_times()
         if hasattr(self, "dataset"):
             times.update(self.dataset.get_times())
-        times.update({"AI": self.wrapper.get_times()})
+        times.update(self.wrapper.get_times())
         times.update(self.rewardMgr.get_times())
         return times
 
@@ -292,7 +293,7 @@ class PE_Env(py_environment.PyEnvironment):
         self.prev_ai_epoch = ai_epoch
 
         if ai_state == "finished_wrapper":
-            self.reward_rec.close()
+            self.rewardMgr.reward_rec.close()
             return True
 
         elif ai_state == "action_needed":
@@ -357,6 +358,9 @@ class PE_Env(py_environment.PyEnvironment):
 
     def update_map(self):
         return self.rewardMgr.update_map()
+
+    def get_reward_filepath(self):
+        return self.rewardMgr.get_reward_filepath()
 
     def is_done(self):
         return self.completed_dataset_once

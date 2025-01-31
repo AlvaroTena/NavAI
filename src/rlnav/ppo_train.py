@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import signal
 import sys
@@ -7,10 +8,17 @@ import warnings
 
 import neptune
 import numpy as np
+import pandas as pd
+from absl import logging as absl_logging
+from neptune_tensorboard import enable_tensorboard_logging
+from tf_agents.drivers import dynamic_step_driver
+from tf_agents.environments import parallel_py_environment, tf_py_environment
+from tf_agents.replay_buffers import tf_uniform_replay_buffer
+from tf_agents.utils import common
+
 from navutils.config import load_config
 from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
-from neptune_tensorboard import enable_tensorboard_logging
 from pewrapper.misc.version_wrapper_bin import RELEASE_INFO
 from rlnav.agent.ppo_agent import create_ppo_agent
 from rlnav.env.pe_env import PE_Env, get_transformers_min_max
@@ -19,10 +27,6 @@ from rlnav.managers.reward_mgr import RewardManager
 from rlnav.managers.wrapper_mgr import WrapperManager
 from rlnav.recorder.training_recorder import TrainingRecorder
 from rlnav.types.running_metric import RunningMetric
-from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import parallel_py_environment, tf_py_environment
-from tf_agents.replay_buffers import tf_uniform_replay_buffer
-from tf_agents.utils import common
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -80,7 +84,11 @@ class EnvCreator:
             min_values=self.min_values,
             max_values=self.max_values,
             transformers_path=self.config.transformed_data.path,
-            window_size=self.config.rnn.window_size if self.config.rnn.enable else 1,
+            window_size=(
+                self.config.training.rnn.window_size
+                if self.config.training.rnn.enable
+                else 1
+            ),
             output_path=self.output_path,
         )
 
@@ -151,11 +159,13 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
         min_values=min_values,
         max_values=max_values,
         transformers_path=config.transformed_data.path,
-        window_size=config.rnn.window_size if config.rnn.enable else 1,
+        window_size=(
+            config.training.rnn.window_size if config.training.rnn.enable else 1
+        ),
         output_path=output_path,
     )
     agent = create_ppo_agent(
-        tf_py_environment.TFPyEnvironment(env), npt_run, rnn=config.rnn.enable
+        tf_py_environment.TFPyEnvironment(env), npt_run, rnn=config.training.rnn.enable
     )
 
     early_stopping_threshold = 0.1
@@ -184,7 +194,7 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
 
             scenario_logpath = os.path.join(output_path, scenario)
 
-            num_parallel_environments = 5
+            num_parallel_environments = config.training.num_parallel_environments
 
             train_env = create_parallel_environment(
                 config,
@@ -198,7 +208,7 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
 
             for i, sub_env in enumerate(train_env._envs):
                 sub_env.rewardMgr.set_output_path(
-                    os.path.join(scenario_logpath, f"env_{i}"),
+                    os.path.join(baseRewardMgr.output_path, f"env_{i}"),
                     scenario,
                     generation,
                 )
@@ -207,14 +217,14 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
             replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
                 data_spec=agent.collect_data_spec,
                 batch_size=train_env.batch_size,
-                max_length=3000,
+                max_length=10,
             )
 
             driver = dynamic_step_driver.DynamicStepDriver(
                 train_env,
                 agent.collect_policy,
                 observers=[replay_buffer.add_batch],
-                num_steps=3000,
+                num_steps=10,
             )
 
             # Configura el checkpointer.
@@ -235,14 +245,15 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
             # Restaurar desde el último checkpoint si existe.
             train_checkpointer.initialize_or_restore()
 
-            if npt_run.exists(f"training/train/instant_running_reward"):
-                del npt_run[f"training/train/instant_running_reward"]
-            if npt_run.exists(f"training/train/instant_reward"):
-                del npt_run[f"training/train/instant_reward"]
-            if npt_run.exists(f"training/train/cummulative_reward"):
-                del npt_run[f"training/train/cummulative_reward"]
-            if npt_run.exists(f"training/train/AI_Errors"):
-                del npt_run[f"training/train/AI_Errors"]
+            for i in range(num_parallel_environments):
+                if npt_run.exists(f"training/train/env_{i}/instant_running_reward"):
+                    del npt_run[f"training/train/env_{i}/instant_running_reward"]
+                if npt_run.exists(f"training/train/env_{i}/instant_reward"):
+                    del npt_run[f"training/train/env_{i}/instant_reward"]
+                if npt_run.exists(f"training/train/env_{i}/cummulative_reward"):
+                    del npt_run[f"training/train/env_{i}/cummulative_reward"]
+                if npt_run.exists(f"training/train/env_{i}/AI_Errors"):
+                    del npt_run[f"training/train/env_{i}/AI_Errors"]
 
             loss.reset()
             policy_gradient_loss.reset()
@@ -266,47 +277,75 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                     times.update({"agent_train": [time.time() - start]})
 
                     times.update(wrapperMgr.get_times())
+                    envs_times = {}
                     for i, sub_env in enumerate(train_env._envs):
                         sub_env_times = sub_env.call("get_times")
-                        times.update({f"env_{i}": sub_env_times()})
+                        envs_times.update({f"env_{i}": sub_env_times()})
                     if config.neptune.monitoring_times:
+                        min_mean_max = {}
+
+                        for time_key in envs_times[next(iter(envs_times))]:
+                            values = [
+                                times_dict[time_key]
+                                for times_dict in envs_times.values()
+                            ]
+                            min_mean_max[f"{time_key}_min"] = np.min(
+                                values, axis=0
+                            ).tolist()
+                            min_mean_max[f"{time_key}_mean"] = np.mean(
+                                values, axis=0
+                            ).tolist()
+                            min_mean_max[f"{time_key}_max"] = np.max(
+                                values, axis=0
+                            ).tolist()
+
+                        if min_mean_max:
+                            times.update({"AI": min_mean_max})
+
                         npt_run["monitoring/times"].extend(remove_empty_lists(times))
 
+                    log_data = {}
                     for i, sub_env in enumerate(train_env._envs):
-                        log_data = sub_env.call("get_logging_data")()
+                        sub_env_data = sub_env.call("get_logging_data")
+                        log_data.update({f"env_{i}": sub_env_data()})
 
-                        if "ai_errors" in log_data:
-                            for key, values in log_data["ai_errors"].items():
-                                npt_run[
-                                    f"training/env_{i}/{scenario}/AI_generation{generation}/{key}"
-                                ].extend(values)
-                                npt_run[
-                                    f"training/env_{i}/train/AI_Errors/{key}"
-                                ].extend(values)
+                    mean_std = {}
+                    for log_key in log_data[next(iter(log_data))]:
+                        if log_key == "ai_errors":
+                            error_dict = {}
+                            for error_key in log_data[next(iter(log_data))][log_key]:
+                                values = [
+                                    log_dict[log_key][error_key]
+                                    for log_dict in log_data.values()
+                                ]
 
-                        if "running_rewards" in log_data:
-                            npt_run[
-                                f"training/env_{i}/train/instant_running_reward"
-                            ].extend(log_data["running_rewards"])
-                            npt_run[
-                                f"training/env_{i}/{scenario}/AI_generation{generation}/instant_running_reward"
-                            ].extend(log_data["running_rewards"])
+                                error_dict[f"{error_key}_mean"] = np.mean(
+                                    values, axis=0
+                                ).tolist()
+                                error_dict[f"{error_key}_std"] = np.std(
+                                    values, axis=0
+                                ).tolist()
 
-                        if "instant_rewards" in log_data:
-                            npt_run[f"training/env_{i}/train/instant_reward"].extend(
-                                log_data["instant_rewards"]
+                            mean_std.update({"AI_Errors": error_dict})
+
+                        else:
+                            values = [
+                                log_dict[log_key] for log_dict in log_data.values()
+                            ]
+
+                            mean_std.update(
+                                {f"{log_key}_mean": np.mean(values, axis=0).tolist()}
                             )
-                            npt_run[
-                                f"training/env_{i}/{scenario}/AI_generation{generation}/instant_reward"
-                            ].extend(log_data["instant_rewards"])
+                            mean_std.update(
+                                {f"{log_key}_std": np.std(values, axis=0).tolist()}
+                            )
 
-                        if "cummulative_rewards" in log_data:
-                            npt_run[
-                                f"training/env_{i}/train/cummulative_reward"
-                            ].extend(log_data["cummulative_rewards"])
-                            npt_run[
-                                f"training/env_{i}/{scenario}/AI_generation{generation}/cummulative_reward"
-                            ].extend(log_data["cummulative_rewards"])
+                    if mean_std:
+                        mean_std = remove_empty_lists(mean_std)
+                        npt_run[
+                            f"training/{scenario}/AI_generation{generation}"
+                        ].extend(mean_std)
+                        npt_run[f"training/train"].extend(mean_std)
 
                     loss.update(train_loss.loss.numpy())
                     policy_gradient_loss.update(
@@ -350,9 +389,31 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                     replay_buffer.clear()
 
                     if agent.train_step_counter.numpy() % 10 == 0:
+                        envs_positions = {}
                         for i, sub_env in enumerate(train_env._envs):
-                            map_file = sub_env.call("update_map")()
-                            npt_run[f"training/env_{i}/train/map"].upload(map_file)
+                            sub_env.call("update_map")()
+                            sub_env_position = sub_env.call("get_ai_positions")()
+                            envs_positions.update({f"env_{i}": sub_env_position})
+
+                        if envs_positions:
+                            df_list = list(envs_positions.values())
+                            df_mean_positions = pd.DataFrame(
+                                {
+                                    "LAT_PROP": np.mean(
+                                        [df["LAT_PROP"] for df in df_list], axis=0
+                                    ),
+                                    "LON_PROP": np.mean(
+                                        [df["LON_PROP"] for df in df_list], axis=0
+                                    ),
+                                }
+                            )
+                            df_mean_positions.index = df_list[0].index
+                            baseRewardMgr.ai_positions = pd.concat(
+                                [baseRewardMgr.ai_positions, df_mean_positions]
+                            )
+
+                        map_file = baseRewardMgr.update_map()
+                        npt_run[f"training/train/env_{i}/map"].upload(map_file)
 
                     # Guardar un checkpoint.
                     if agent.train_step_counter.numpy() % 1000 == 0:
@@ -386,11 +447,11 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
             for i, sub_env in enumerate(train_env._envs):
                 map_file = sub_env.call("update_map")()
                 npt_run[
-                    f"training/env_{i}/{scenario}/AI_generation{generation}/map"
+                    f"training/{scenario}/env_{i}/AI_generation{generation}/map"
                 ].upload(map_file)
                 npt_run[
-                    f"training/env_{i}/{scenario}/AI_generation{generation}/reward"
-                ].upload(sub_env.rewardMgr.reward_rec.file_path)
+                    f"training/{scenario}/env_{i}/AI_generation{generation}/reward"
+                ].upload(sub_env.call("get_reward_filepath")())
 
             train_checkpointer.save(agent.train_step_counter.numpy())
             for checkpoint_file in os.listdir(checkpoint_dir):
@@ -424,38 +485,15 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
 
 
 def main(argv=sys.argv):
+    # Disable absl logging and use python logging
+    absl_logging.use_python_logging()
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        if isinstance(handler, absl_logging.ABSLHandler):
+            root_logger.removeHandler(handler)
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-
-    ################################################
-    ###############  INPUTS SECTION  ###############
-    ################################################
-    parser = argparse.ArgumentParser(description="Allowed options")
-    parser.version = RELEASE_INFO
-    parser.add_argument("-v", "--version", help="print version", action="version")
-    parser.add_argument(
-        "-c", "--config_file", help="config file", dest="config_file_path"
-    )
-    parser.add_argument(
-        "-o", "--output_directory", help="output directory", dest="output_path"
-    )
-    parser.add_argument(
-        "-g", "--debug_level", help="debug level (INFO/WARNING/ERROR/DEBUG)"
-    )
-    parser.add_argument(
-        "-p", "--parsing_rate", type=int, default=0, help="parsing_rate(optional)"
-    )
-
-    args = parser.parse_args(argv[1:])
-    args.output_path = os.path.join(args.output_path)
-
-    run = neptune.init_run(
-        project="AI-PE/RL-GSharp",
-        monitoring_namespace="monitoring/03_agent_training",
-        source_files=["config/RLNav/params.yaml", "src/rlnav/**/*.py"],
-    )
-
-    Logger(args.output_path, run, use_dual_logging=True)
 
     if not args.output_path or not args.debug_level:
         Logger.log_message(
@@ -495,9 +533,35 @@ def main(argv=sys.argv):
 
 
 if __name__ == "__main__":
-    from absl import logging as absl_logging
+    ################################################
+    ###############  INPUTS SECTION  ###############
+    ################################################
+    parser = argparse.ArgumentParser(description="Allowed options")
+    parser.version = RELEASE_INFO
+    parser.add_argument("-v", "--version", help="print version", action="version")
+    parser.add_argument(
+        "-c", "--config_file", help="config file", dest="config_file_path"
+    )
+    parser.add_argument(
+        "-o", "--output_directory", help="output directory", dest="output_path"
+    )
+    parser.add_argument(
+        "-g", "--debug_level", help="debug level (INFO/WARNING/ERROR/DEBUG)"
+    )
+    parser.add_argument(
+        "-p", "--parsing_rate", type=int, default=0, help="parsing_rate(optional)"
+    )
 
-    absl_logging.use_python_logging()
+    args = parser.parse_args(sys.argv[1:])
+    args.output_path = os.path.join(args.output_path)
+    sys.argv.insert(1, "--")  # This is needed to avoid absl flags parsing errors
+
+    run = neptune.init_run(
+        project="AI-PE/RL-GSharp",
+        monitoring_namespace="monitoring/03_agent_training",
+        source_files=["config/RLNav/params.yaml", "src/rlnav/**/*.py"],
+    )
+    Logger(args.output_path, run)
 
     from tf_agents.system import multiprocessing as mp
 

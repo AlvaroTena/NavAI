@@ -4,9 +4,10 @@ import os
 import shutil
 import time
 
+from neptune import Run
+
 import pewrapper.misc.parser_utils as parser_utils
 from navutils.logger import Logger
-from neptune import Run
 from pewrapper.api.common_api_types import Log_Handle, LogCategoryPE
 from pewrapper.managers import configuration_mgr, wrapper_data_mgr
 from pewrapper.types.gps_time_wrapper import GPS_Time
@@ -104,6 +105,7 @@ class WrapperManager:
             )
             raise FileNotFoundError(log_msg)
 
+        self.base_output_path = output_path
         self.output_path = output_path
 
         self._log_npt = npt_run
@@ -194,6 +196,7 @@ class WrapperManager:
 
             else:
                 scenario_path = os.path.join(self.scenarios_path, self.scenario)
+                parent_scenario_name = ""
                 if not os.path.isdir(scenario_path) and is_scenario_subset(
                     self.scenario
                 ):
@@ -218,12 +221,17 @@ class WrapperManager:
             time_dst = "restart_scenario"
             self.scenario_generation[self.scenario] += 1
             logs_npt["generation"] = self.scenario_generation[self.scenario]
-            output_path = os.path.join(self.output_path, self.scenario)
-            self.rewardMgr.next_generation(
-                output_path,
-                self.scenario,
-                self.scenario_generation[self.scenario],
-            )
+            self.rewardMgr.next_generation()
+
+        self.rewardMgr.set_output_path(
+            os.path.join(
+                self.output_path,
+                f"AI_gen{(gen := self.scenario_generation[self.scenario])}",
+            ),
+            self.scenario,
+            gen,
+        )
+
         self._log_npt["training"] = logs_npt
         self._times[f"{time_dst}"].append(time.time() - start)
 
@@ -287,10 +295,9 @@ class WrapperManager:
                 ref_type,
             ) = result
 
-        output_path = os.path.join(self.output_path, self.scenario)
-        os.makedirs(output_path, exist_ok=True)
+        self.output_path = os.path.join(self.base_output_path, self.scenario)
 
-        self.configMgr.reset(output_path, tracing_config_file)
+        self.configMgr.reset(self.output_path, tracing_config_file)
         self.wrapper_data.reset(initial_epoch_session, final_epoch_session)
 
         self.rewardMgr.load_reference(reference_file_path, ref_mode, ref_type)
@@ -299,7 +306,7 @@ class WrapperManager:
             session_path,
             config_file_path,
             tracing_config_file,
-            output_path,
+            self.output_path,
         )
 
         ################################################
@@ -422,17 +429,9 @@ class WrapperManager:
             initial_epoch = initial_epoch_session
             final_epoch = final_epoch_session
 
-        output_path = os.path.join(self.output_path, self.scenario)
-        os.makedirs(output_path, exist_ok=True)
-
-        self.configMgr.reset_log_path(output_path)
+        self.configMgr.reset_log_path(self.output_path)
         self.wrapper_data.reset_epochs(initial_epoch, final_epoch)
 
-        self.rewardMgr.set_output_path(
-            output_path,
-            self.scenario,
-            self.scenario_generation[self.scenario],
-        )
         self.rewardMgr.limit_epochs(initial_epoch, final_epoch)
         pe_errors = self.rewardMgr.limit_baseline_log(initial_epoch, final_epoch)
         self._log_baseline_errors(pe_errors)
@@ -441,7 +440,7 @@ class WrapperManager:
             session_path,
             config_file_path,
             tracing_config_file,
-            output_path,
+            self.output_path,
             subsession_epochs,
         )
 
@@ -519,9 +518,10 @@ class WrapperManager:
             del self._log_npt[f"training/train/PE_Errors"]
 
         if self._log_npt is not None and self._log_npt._mode != "debug":
-            self._log_npt[f"training/{self.scenario}/PE"].extend(
-                {k: v.to_list() for k, v in pe_errors.items()}
-            )
-            self._log_npt[f"training/train/PE_Errors"].extend(
-                {k: v.to_list() for k, v in pe_errors.items()}
-            )
+            if all([v is not None and not v.empty for v in pe_errors.values()]):
+                self._log_npt[f"training/{self.scenario}/PE"].extend(
+                    {k: v.to_list() for k, v in pe_errors.items()}
+                )
+                self._log_npt[f"training/train/PE_Errors"].extend(
+                    {k: v.to_list() for k, v in pe_errors.items()}
+                )

@@ -6,8 +6,9 @@ import folium
 import numpy as np
 import pandas as pd
 import pyproj
-import rlnav.types.constants as const
 from geopy.point import Point
+
+import rlnav.types.constants as const
 from navutils.logger import Logger
 from pewrapper.api.pe_api_types import Latitude_Direction, Longitude_Direction
 from pewrapper.managers import OutputStr
@@ -88,6 +89,7 @@ class RewardManager:
         self.scenario = ""
         self.generation = 1
         self.output_path = ""
+        self.map_file = ""
         self.reset_times()
 
         self.reward = RunningDiffMetric(decay=0.9)
@@ -132,14 +134,15 @@ class RewardManager:
         generation,
     ):
         os.makedirs(
-            gen_output := os.path.join(output_path, f"AI_generation{generation}"),
+            output_path,
             exist_ok=True,
         )
-        self.output_path = os.path.join(gen_output, "map.html")
+        self.output_path = output_path
+        self.map_file = os.path.join(output_path, "map.html")
         self.scenario = scenario
         self.generation = generation
 
-        self.reward_rec.reset(gen_output)
+        self.reward_rec.reset(output_path)
 
     def limit_epochs(self, initial_epoch: GPS_Time, final_epoch: GPS_Time):
         initial_epoch = pd.to_datetime(
@@ -289,10 +292,8 @@ class RewardManager:
                 else:
                     reward = -np.log(ai_rmse / (pe_rmse + 1e-6))
 
-                reward = np.tanh(reward)
-
             elif ai_ref_df is None and not pe_ref_df.empty:
-                reward = -1.0
+                reward = -10.0
 
             else:
                 reward = 0.0
@@ -305,6 +306,7 @@ class RewardManager:
             )
             reward = 0.0
 
+        reward = np.clip(reward, -10.0, 10.0)
         self.reward.update(reward)
 
         instant_reward = self.reward.get_differentiated_value()
@@ -317,7 +319,7 @@ class RewardManager:
         self.log_data["instant_rewards"].append(instant_reward)
         self.log_data["cummulative_rewards"].append(cummulative_reward)
 
-        return self.reward.get_differentiated_value()
+        return instant_reward
 
     def get_log_data(self):
         data = self.log_data.copy()
@@ -615,12 +617,8 @@ class RewardManager:
         ref_positions = self.ref_positions
         if hasattr(self, "initial_epoch") and hasattr(self, "final_epoch"):
             ref_positions = ref_positions[
-                ref_positions.index.isin(
-                    self.ref_positions[
-                        self.ref_positions.index.to_series().between(
-                            self.initial_epoch, self.final_epoch
-                        )
-                    ].index
+                ref_positions.index.to_series().between(
+                    self.initial_epoch, self.final_epoch
                 )
             ]
         self.ref_polyline = folium.PolyLine(
@@ -634,17 +632,13 @@ class RewardManager:
         base_positions = self.base_positions
         if hasattr(self, "initial_epoch") and hasattr(self, "final_epoch"):
             base_positions = base_positions[
-                base_positions.index.isin(
-                    self.base_positions[
-                        self.base_positions.index.to_series().between(
-                            self.initial_epoch, self.final_epoch
-                        )
-                    ].index
+                base_positions.index.to_series().between(
+                    self.initial_epoch, self.final_epoch
                 )
             ]
 
         self.base_polyline = folium.PolyLine(
-            self.base_positions.values.tolist(),
+            base_positions.values.tolist(),
             color="green",
             weight=2.5,
             opacity=1,
@@ -675,9 +669,9 @@ class RewardManager:
 
             self.last_ai_position_index = len(self.ai_positions)
 
-            self.map.save(self.output_path)
+            self.map.save(self.map_file)
 
-        return self.output_path
+        return self.map_file
 
     def match_ref(self, epoch: GPS_Time):
         raw_epoch = pd.to_datetime(
@@ -690,7 +684,7 @@ class RewardManager:
 
     def check_reconvergence(self):
         """
-        Check if the current error (RMSE) exceeds 3σ
+        Check if the current error (RMSE) exceeds 3sigma
         (three standard deviations) from their respective means, indicating
         the need for reconvergence.
         """
@@ -724,3 +718,9 @@ class RewardManager:
             self.rmse_patience = 0
 
         return reconvergence_needed
+
+    def get_ai_positions(self):
+        return self.ai_positions
+
+    def get_reward_filepath(self):
+        return self.reward_rec.file_path
