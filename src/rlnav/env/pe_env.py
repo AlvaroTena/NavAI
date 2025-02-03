@@ -356,6 +356,9 @@ class PE_Env(py_environment.PyEnvironment):
 
         return logging_data
 
+    def get_ai_positions(self):
+        return self.rewardMgr.get_ai_positions()
+
     def update_map(self):
         return self.rewardMgr.update_map()
 
