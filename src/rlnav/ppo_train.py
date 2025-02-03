@@ -60,6 +60,7 @@ class EnvCreator:
         min_values,
         max_values,
         output_path,
+        shared_queue,
     ):
         self.config = config
         self.configMgr = configMgr
@@ -70,11 +71,14 @@ class EnvCreator:
         self.min_values = min_values
         self.max_values = max_values
         self.output_path = output_path
+        self.shared_queue = shared_queue
 
     def __call__(self):
         """
         Este método permite que la clase actúe como una función al ser llamada.
         """
+        absl_logging.use_python_logging(quiet=True)
+        Logger.reconfigure_child(log_queue=self.shared_queue)
         return PE_Env(
             configMgr=self.configMgr,
             wrapper_data=self.wrapper_data,
@@ -117,6 +121,7 @@ def create_parallel_environment(
                 min_values=min_values,
                 max_values=max_values,
                 output_path=os.path.join(output_path, f"env_{i}"),
+                shared_queue=Logger.get_queue(),
             )
             for i in range(num_parallel_environments)
         ]

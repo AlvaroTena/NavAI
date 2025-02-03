@@ -1,9 +1,9 @@
 import logging
-import logging.handlers
 import os
 import queue
 import sys
 from enum import Enum, IntEnum
+from logging.handlers import QueueHandler, QueueListener
 from threading import Lock
 
 from neptune import Run
@@ -147,7 +147,13 @@ class Logger(metaclass=Singleton):
                 ai_str = "AI" if use_AI else "  "
                 return f"{ai_str}] [{mod_str}"
 
-    def __init__(self, output_path: str, npt_run: Run = None, use_dual_logging=False):
+    def __init__(
+        self,
+        output_path: str,
+        npt_run: Run = None,
+        use_dual_logging=False,
+        log_queue=None,
+    ):
         """Initializes the Logger instance."""
         if Logger._instance is not None:
             return
@@ -160,8 +166,17 @@ class Logger(metaclass=Singleton):
             os.makedirs(self.log_dir, exist_ok=True)
 
             self.handlers = []
-            self.log_queue = queue.Queue()
-            self.queue_handler = logging.handlers.QueueHandler(self.log_queue)
+            if log_queue is None:
+                from multiprocessing import Manager
+
+                manager = Manager()
+                self.log_queue = manager.Queue()
+                self.is_parent = True
+            else:
+                self.log_queue = log_queue
+                self.is_parent = False
+
+            self.queue_handler = QueueHandler(self.log_queue)
             self._initialize_handlers(npt_run)
 
             self.log_lock = Lock()
@@ -173,10 +188,11 @@ class Logger(metaclass=Singleton):
             )
             self.logger = logging.getLogger(__name__)
 
-            self.queue_listener = logging.handlers.QueueListener(
-                self.log_queue, *self.handlers
-            )
-            self.queue_listener.start()
+            if self.is_parent:
+                self.queue_listener = QueueListener(self.log_queue, *self.handlers)
+                self.queue_listener.start()
+            else:
+                self.queue_listener = None
 
             addLoggingLevel("TRACE", Logger.Category.TRACE)
 
@@ -205,6 +221,14 @@ class Logger(metaclass=Singleton):
         )
         # file_handler.addFilter(WrapperLogFilter(use_ai=use_ai))
         return file_handler
+
+    @staticmethod
+    def reconfigure_child(log_queue):
+        instance = Logger.get_instance()
+        with instance.log_lock:
+            instance.log_queue = log_queue
+            instance.is_parent = False
+            instance.queue_listener = None
 
     @classmethod
     def get_instance(cls):
@@ -235,6 +259,12 @@ class Logger(metaclass=Singleton):
         """Gets the current logging category level."""
         instance = Logger.get_instance()
         return Logger.Category(instance.logger.getEffectiveLevel())
+
+    @staticmethod
+    def get_queue():
+        """Gets the current logging queue."""
+        instance = Logger.get_instance()
+        return instance.log_queue
 
     @staticmethod
     def set_category(cat: str):
