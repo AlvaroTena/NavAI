@@ -1,9 +1,11 @@
 import copy
+import os
 import time
 from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
+
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
 from navutils.logger import Logger
@@ -245,6 +247,7 @@ class RLWrapper(Wrapper):
         config = self.configMgr_.get_config(
             self.output_path if self.use_AI else None, self.use_AI, self.generation
         )
+        os.makedirs(config.log_path.decode("utf-8"), exist_ok=True)
 
         result_pe, self.pe_output.output_PE.pe_solution_info.SSM_Signal = (
             self.position_engine_.Reboot(
@@ -268,11 +271,9 @@ class RLWrapper(Wrapper):
             )
             return False
 
-        if self.wrapper_file_data_:
-            self._activate_output_position_file(
-                config.log_path.decode("utf-8"), self.wrapper_file_data_.initial_epoch
-            )
-
+        self._activate_output_position_file(
+            config.log_path.decode("utf-8"), self.wrapper_file_data_.initial_epoch
+        )
         self.position_recorder_.write_pos_header(pe_wrapper_commit, common_lib_commit)
 
         self.wrapper_data = iter(self.wrapper_file_data_)

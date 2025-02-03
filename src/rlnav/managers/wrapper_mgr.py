@@ -226,7 +226,7 @@ class WrapperManager:
         self.rewardMgr.set_output_path(
             os.path.join(
                 self.output_path,
-                f"AI_gen{(gen := self.scenario_generation[self.scenario])}",
+                f"AI_generation{(gen := self.scenario_generation[self.scenario])}",
             ),
             self.scenario,
             gen,
