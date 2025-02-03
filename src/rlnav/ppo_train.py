@@ -222,14 +222,14 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
             replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
                 data_spec=agent.collect_data_spec,
                 batch_size=train_env.batch_size,
-                max_length=10,
+                max_length=600,
             )
 
             driver = dynamic_step_driver.DynamicStepDriver(
                 train_env,
                 agent.collect_policy,
                 observers=[replay_buffer.add_batch],
-                num_steps=10,
+                num_steps=600,
             )
 
             # Configura el checkpointer.

@@ -52,4 +52,4 @@ def PE_LogWrapper(
         LogCategoryPE.error.value: Logger.Category.ERROR,
     }.get(category, Logger.Category.ERROR)
     message = eventParticulars.decode("utf-8")
-    Logger.log_message(level, Logger.Module.PE, f"{message}", use_AI=use_AI)
+    # Logger.log_message(level, Logger.Module.PE, f"{message}", use_AI=use_AI)
