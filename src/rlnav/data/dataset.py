@@ -5,12 +5,13 @@ from collections import defaultdict
 import dill as pickle
 import numpy as np
 import pandas as pd
+from tf_agents.specs import array_spec
+
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
 from rlnav.data.process import DataProcessor
 from rlnav.data.transform import ColumnTransformer
-from rlnav.types.utils import get_global_sat_idx
-from tf_agents.specs import array_spec
+from rlnav.utils.common import get_global_sat_idx
 
 
 class RLDataset:

@@ -193,6 +193,7 @@ class RewardManager:
 
     def log_baseline(self, baseline):
         pe_errors = {
+            "Epoch": baseline["RawEpoch"],
             "NorthError": baseline["NorthErrorProp"],
             "EastError": baseline["EastErrorProp"],
             "UpError": baseline["UpErrorProp"],
@@ -315,8 +316,8 @@ class RewardManager:
 
         self._times["compute_reward"].append(time.time() - start)
 
-        self.log_data["running_rewards"].append(running_reward)
         self.log_data["instant_rewards"].append(instant_reward)
+        self.log_data["running_rewards"].append(running_reward)
         self.log_data["cummulative_rewards"].append(cummulative_reward)
 
         return instant_reward

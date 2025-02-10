@@ -14,7 +14,7 @@ from pewrapper.types.gps_time_wrapper import GPS_Time
 from rlnav.env.wrapper import RLWrapper
 from rlnav.managers import reward_mgr
 from rlnav.types.reference_types import ReferenceMode, ReferenceType
-from rlnav.types.utils import get_parent_scenario_name, is_scenario_subset
+from rlnav.utils.common import get_parent_scenario_name, is_scenario_subset
 
 
 @Log_Handle
@@ -520,8 +520,8 @@ class WrapperManager:
         if self._log_npt is not None and self._log_npt._mode != "debug":
             if all([v is not None and not v.empty for v in pe_errors.values()]):
                 self._log_npt[f"training/{self.scenario}/PE"].extend(
-                    {k: v.to_list() for k, v in pe_errors.items()}
+                    {k: v.to_list() for k, v in pe_errors.items() if k != "Epoch"}
                 )
                 self._log_npt[f"training/train/PE_Errors"].extend(
-                    {k: v.to_list() for k, v in pe_errors.items()}
+                    {k: v.to_list() for k, v in pe_errors.items() if k != "Epoch"}
                 )

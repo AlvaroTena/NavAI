@@ -28,7 +28,7 @@ from pewrapper.types.gps_time_wrapper import GPS_Time
 from pewrapper.wrapper_handler import Wrapper
 from rlnav.data.reader import Reader
 from rlnav.managers.reward_mgr import RewardManager
-from rlnav.types.utils import get_global_sat_idx
+from rlnav.utils.common import get_global_sat_idx
 
 
 class WrapperDataAttributeError(AttributeError):
