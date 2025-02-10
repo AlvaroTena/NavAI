@@ -1,6 +1,7 @@
 import copy
 import os
 import time
+from typing import Union
 
 import folium
 import numpy as np
@@ -144,15 +145,21 @@ class RewardManager:
 
         self.reward_rec.reset(output_path)
 
-    def limit_epochs(self, initial_epoch: GPS_Time, final_epoch: GPS_Time):
-        initial_epoch = pd.to_datetime(
-            initial_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
-        final_epoch = pd.to_datetime(
-            final_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
+    def limit_epochs(
+        self,
+        initial_epoch: Union[pd.Timestamp, GPS_Time],
+        final_epoch: Union[pd.Timestamp, GPS_Time],
+    ):
+        if isinstance(initial_epoch, GPS_Time):
+            initial_epoch = pd.to_datetime(
+                initial_epoch.calendar_column_str_d(),
+                format="%Y %m %d %H %M %S.%f",
+            )
+        if isinstance(final_epoch, GPS_Time):
+            final_epoch = pd.to_datetime(
+                final_epoch.calendar_column_str_d(),
+                format="%Y %m %d %H %M %S.%f",
+            )
 
         self.initial_epoch = initial_epoch
         self.final_epoch = final_epoch
@@ -176,15 +183,21 @@ class RewardManager:
 
         return self.log_baseline(self.base_data)
 
-    def limit_baseline_log(self, initial_epoch: GPS_Time, final_epoch: GPS_Time):
-        initial_epoch = pd.to_datetime(
-            initial_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
-        final_epoch = pd.to_datetime(
-            final_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
+    def limit_baseline_log(
+        self,
+        initial_epoch: Union[pd.Timestamp, GPS_Time],
+        final_epoch: Union[pd.Timestamp, GPS_Time],
+    ):
+        if isinstance(initial_epoch, GPS_Time):
+            initial_epoch = pd.to_datetime(
+                initial_epoch.calendar_column_str_d(),
+                format="%Y %m %d %H %M %S.%f",
+            )
+        if isinstance(final_epoch, GPS_Time):
+            final_epoch = pd.to_datetime(
+                final_epoch.calendar_column_str_d(),
+                format="%Y %m %d %H %M %S.%f",
+            )
 
         baseline = self.base_data[
             self.base_data["RawEpoch"].between(initial_epoch, final_epoch)
@@ -674,11 +687,15 @@ class RewardManager:
 
         return self.map_file
 
-    def match_ref(self, epoch: GPS_Time):
-        raw_epoch = pd.to_datetime(
-            epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
+    def match_ref(self, epoch: Union[pd.Timestamp, GPS_Time]):
+        if isinstance(epoch, GPS_Time):
+            raw_epoch = pd.to_datetime(
+                epoch.calendar_column_str_d(),
+                format="%Y %m %d %H %M %S.%f",
+            )
+        else:
+            raw_epoch = epoch
+
         epoch = raw_epoch.round(freq="100ms")
 
         return self.reference_data["Epoch"].isin([epoch]).any()

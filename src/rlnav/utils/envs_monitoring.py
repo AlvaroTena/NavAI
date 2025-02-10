@@ -90,12 +90,6 @@ def extract_agent_stats(parallel_envs, agent_stats):
             agent_stats[metric_key] = {"mean": [], "std": []}
         elif metric_key == "AI_Errors" and "agent_errors" not in agent_stats:
             agent_stats["agent_errors"] = {}
-            for error_key in stats:
-                if error_key not in agent_stats["agent_errors"]:
-                    agent_stats["agent_errors"][error_key] = {
-                        "mean": [],
-                        "std": [],
-                    }
 
         if metric_key != "AI_Errors":
             agent_stats[metric_key]["mean"].extend(stats["mean"])
@@ -103,6 +97,11 @@ def extract_agent_stats(parallel_envs, agent_stats):
 
         else:
             for error_key, error_stats in stats.items():
+                if error_key not in agent_stats["agent_errors"]:
+                    agent_stats["agent_errors"][error_key] = {
+                        "mean": [],
+                        "std": [],
+                    }
                 agent_stats["agent_errors"][error_key]["mean"].extend(
                     error_stats["mean"]
                 )

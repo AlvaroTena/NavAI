@@ -12,6 +12,7 @@ import pandas as pd
 import tensorflow as tf
 from absl import logging as absl_logging
 from neptune_tensorboard import enable_tensorboard_logging
+from tf_agents.agents import tf_agent
 from tf_agents.drivers import dynamic_step_driver
 from tf_agents.environments import parallel_py_environment, tf_py_environment
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
@@ -199,24 +200,15 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                 scenario = wrapperMgr.scenario
                 generation = wrapperMgr.scenario_generation[scenario]
 
-                scenario_logpath = os.path.join(output_path, scenario)
-
                 train_env = create_parallel_environment(
                     config,
                     wrapperMgr,
                     baseRewardMgr,
                     min_values,
                     max_values,
-                    scenario_logpath,
+                    baseRewardMgr.output_path,
                     config.training.num_parallel_environments,
                 )
-
-                for i, sub_env in enumerate(train_env._envs):
-                    sub_env.rewardMgr.set_output_path(
-                        os.path.join(baseRewardMgr.output_path, f"env_{i}"),
-                        scenario,
-                        generation,
-                    )
 
                 policy_dir = os.path.join(output_path, "policy")
                 policy_saver = common.Checkpointer(
@@ -269,17 +261,17 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
 
 
 def train_agent(
-    train_env,
-    agent,
-    reward_manager,
-    scenario,
-    generation,
-    npt_run,
-    log_times,
-    envs_times,
-    agent_stats,
-    training_recorder,
-    output_path,
+    train_env: tf_py_environment.TFPyEnvironment,
+    agent: tf_agent.TFAgent,
+    reward_manager: RewardManager,
+    scenario: str,
+    generation: int,
+    npt_run: neptune.Run,
+    log_times: bool,
+    envs_times: dict,
+    agent_stats: dict,
+    training_recorder: TrainingRecorder,
+    output_path: str,
 ):
     loss = RunningMetric()
     policy_gradient_loss = RunningMetric()
@@ -335,6 +327,14 @@ def train_agent(
                 envs_times = extract_computation_times(train_env._envs, envs_times)
                 for time_key in envs_times:
                     fig_time = generate_times_plot(envs_times, time_key)
+                    if npt_run._mode == "debug":
+                        fig_time.write_html(
+                            os.path.join(
+                                output_path,
+                                "Training_Tracing/times/",
+                                f"times_{time_key}.html",
+                            )
+                        )
                     npt_run[f"monitoring/times/{time_key}"].upload(
                         fig_time, include_plotlyjs="cdn"
                     )
@@ -345,6 +345,10 @@ def train_agent(
             fig_rewards = generate_rewards_plot(
                 {k: v for k, v in agent_stats.items() if k != "agent_errors"}
             )
+            if npt_run._mode == "debug":
+                fig_rewards.write_html(
+                    os.path.join(reward_manager.output_path, "rewards.html")
+                )
             npt_run["training/train/rewards"].upload(
                 fig_rewards, include_plotlyjs="cdn"
             )
@@ -364,6 +368,10 @@ def train_agent(
                 agent_errors=agent_errors,
             )
 
+            if npt_run._mode == "debug":
+                fig_HV.write_html(
+                    os.path.join(reward_manager.output_path, "HV_errors.html")
+                )
             npt_run[f"training/train/HV"].upload(fig_HV, include_plotlyjs="cdn")
             npt_run[f"training/{scenario}/AI_generation{generation}/HV"].upload(
                 fig_HV, include_plotlyjs="cdn"
@@ -375,6 +383,10 @@ def train_agent(
                 agent_errors=agent_errors,
             )
 
+            if npt_run._mode == "debug":
+                fig_NEU.write_html(
+                    os.path.join(reward_manager.output_path, "NEU_errors.html")
+                )
             npt_run[f"training/train/NEU"].upload(fig_NEU, include_plotlyjs="cdn")
             npt_run[f"training/{scenario}/AI_generation{generation}/NEU"].upload(
                 fig_NEU, include_plotlyjs="cdn"
