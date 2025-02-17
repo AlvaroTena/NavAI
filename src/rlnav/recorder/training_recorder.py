@@ -12,6 +12,13 @@ class TrainingRecorder:
         self.output_file = None
         self.csv_writer = None
 
+    def __enter__(self):
+        self.initialize()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def initialize(self):
         os.makedirs(self.output_path, exist_ok=True)
         file_path = os.path.join(

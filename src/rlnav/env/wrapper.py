@@ -1,9 +1,11 @@
 import copy
+import os
 import time
 from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
+
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
 from navutils.logger import Logger
@@ -26,7 +28,7 @@ from pewrapper.types.gps_time_wrapper import GPS_Time
 from pewrapper.wrapper_handler import Wrapper
 from rlnav.data.reader import Reader
 from rlnav.managers.reward_mgr import RewardManager
-from rlnav.types.utils import get_global_sat_idx
+from rlnav.utils.common import get_global_sat_idx
 
 
 class WrapperDataAttributeError(AttributeError):
@@ -87,7 +89,7 @@ class RLWrapper(Wrapper):
         wrapper_file_path: str,
         output_path: str,
         parsing_rate: int,
-    ) -> Tuple[bool]:
+    ):
         prev_pe_epoch = GPS_Time()
         pe_state = ""
 
@@ -131,7 +133,7 @@ class RLWrapper(Wrapper):
                     f"Error processing PE: {pe_state}",
                     use_AI=self.use_AI,
                 )
-                return False
+                return False, None
 
             _, pe_state, pe_pvt = result
             del result
@@ -156,7 +158,7 @@ class RLWrapper(Wrapper):
                         f"Error processing PE: ",
                         self.use_AI,
                     )
-                    return False
+                    return False, None
                 _, pe_out = result
                 if (
                     GPS_Time(
@@ -176,11 +178,11 @@ class RLWrapper(Wrapper):
                 f"Error terminating processing",
                 self.use_AI,
             )
-            return False
+            return False, None
 
         self.position_recorder_.close_file()
 
-        self.rewardMgr.calculate_propagated_base_positions()
+        pe_errors = self.rewardMgr.calculate_propagated_base_positions()
 
         Logger.log_message(
             Logger.Category.DEBUG,
@@ -188,7 +190,7 @@ class RLWrapper(Wrapper):
             f" Wrapper processing finished!",
             self.use_AI,
         )
-        return True
+        return True, pe_errors
 
     def _start_processing(
         self,
@@ -242,15 +244,18 @@ class RLWrapper(Wrapper):
             self.use_AI,
         )
 
+        config = self.configMgr_.get_config(
+            self.output_path if self.use_AI else None, self.use_AI, self.generation
+        )
+        os.makedirs(config.log_path.decode("utf-8"), exist_ok=True)
+
         result_pe, self.pe_output.output_PE.pe_solution_info.SSM_Signal = (
             self.position_engine_.Reboot(
-                self.configMgr_.get_config(self.use_AI, self.generation),
+                config,
                 self.pe_output.output_PE.pe_solution_info.SSM_Signal,
             )
         )
-        self.position_engine_.init_log_PE(
-            self.configMgr_.get_config(self.use_AI, self.generation)
-        )
+        self.position_engine_.init_log_PE(config)
 
         result_pe &= self.state_machine_.ProcessSignal(self.pe_output)
 
@@ -266,11 +271,9 @@ class RLWrapper(Wrapper):
             )
             return False
 
-        if self.wrapper_file_data_:
-            self._activate_output_position_file(
-                output_path, self.wrapper_file_data_.initial_epoch
-            )
-
+        self._activate_output_position_file(
+            config.log_path.decode("utf-8"), self.wrapper_file_data_.initial_epoch
+        )
         self.position_recorder_.write_pos_header(pe_wrapper_commit, common_lib_commit)
 
         self.wrapper_data = iter(self.wrapper_file_data_)

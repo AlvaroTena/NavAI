@@ -1,14 +1,15 @@
 import copy
 import os
 import time
+from typing import Union
 
 import folium
-import neptune
 import numpy as np
 import pandas as pd
 import pyproj
-import rlnav.types.constants as const
 from geopy.point import Point
+
+import rlnav.types.constants as const
 from navutils.logger import Logger
 from pewrapper.api.pe_api_types import Latitude_Direction, Longitude_Direction
 from pewrapper.managers import OutputStr
@@ -73,7 +74,7 @@ class RunningDiffMetric(RunningMetric):
 
 
 class RewardManager:
-    def __init__(self, npt_run: neptune.Run):
+    def __init__(self):
         self.refMgr = ReferenceDataManager(
             ReferenceMode.KINEMATIC, ReferenceType.Kinematic.SPAN_FILE
         )
@@ -89,7 +90,7 @@ class RewardManager:
         self.scenario = ""
         self.generation = 1
         self.output_path = ""
-        self._log_npt = npt_run
+        self.map_file = ""
         self.reset_times()
 
         self.reward = RunningDiffMetric(decay=0.9)
@@ -98,20 +99,16 @@ class RewardManager:
         self.pe_rmse_values = RunningDiffMetric(window_size=-1)
         self.rmse_patience = 0
 
-        if self._log_npt.exists(f"training/train/instant_running_reward"):
-            del self._log_npt[f"training/train/instant_running_reward"]
-        if self._log_npt.exists(f"training/train/instant_reward"):
-            del self._log_npt[f"training/train/instant_reward"]
-        if self._log_npt.exists(f"training/train/cummulative_reward"):
-            del self._log_npt[f"training/train/cummulative_reward"]
+        self.reward_rec = RewardRecorder("")
 
-    def next_generation(
-        self,
-        rewardRec: RewardRecorder,
-        output_path,
-        scenario,
-        generation,
-    ):
+        self.log_data = {
+            "ai_errors": [],
+            "instant_rewards": [],
+            "running_rewards": [],
+            "cummulative_rewards": [],
+        }
+
+    def next_generation(self):
         self.ai_data = pd.DataFrame()
         self.map_initialized = False
         self.ai_positions = pd.DataFrame(columns=["LAT_PROP", "LON_PROP"])
@@ -123,18 +120,6 @@ class RewardManager:
         self.pe_rmse_values.reset()
         self.rmse_patience = 0
 
-        self.set_output_path(rewardRec, output_path, scenario, generation)
-
-        if self._log_npt.exists(f"training/train/AI_Errors"):
-            del self._log_npt[f"training/train/AI_Errors"]
-
-        if self._log_npt.exists(f"training/train/instant_running_reward"):
-            del self._log_npt[f"training/train/instant_running_reward"]
-        if self._log_npt.exists(f"training/train/instant_reward"):
-            del self._log_npt[f"training/train/instant_reward"]
-        if self._log_npt.exists(f"training/train/cummulative_reward"):
-            del self._log_npt[f"training/train/cummulative_reward"]
-
     def reset_times(self):
         self._times = {"compute_reward": []}
 
@@ -145,36 +130,42 @@ class RewardManager:
 
     def set_output_path(
         self,
-        rewardRec: RewardRecorder,
         output_path,
         scenario,
         generation,
     ):
         os.makedirs(
-            gen_output := os.path.join(output_path, f"AI_generation{generation}"),
+            output_path,
             exist_ok=True,
         )
-        self.output_path = os.path.join(gen_output, "map.html")
+        self.output_path = output_path
+        self.map_file = os.path.join(output_path, "map.html")
         self.scenario = scenario
         self.generation = generation
 
-        rewardRec.reset(gen_output)
+        self.reward_rec.reset(output_path)
 
-    def limit_epochs(self, initial_epoch: GPS_Time, final_epoch: GPS_Time):
-        initial_epoch = pd.to_datetime(
-            initial_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
-        final_epoch = pd.to_datetime(
-            final_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
+    def limit_epochs(
+        self,
+        initial_epoch: Union[pd.Timestamp, GPS_Time],
+        final_epoch: Union[pd.Timestamp, GPS_Time],
+    ):
+        if isinstance(initial_epoch, GPS_Time):
+            initial_epoch = pd.to_datetime(
+                initial_epoch.calendar_column_str_d(),
+                format="%Y %m %d %H %M %S.%f",
+            )
+        if isinstance(final_epoch, GPS_Time):
+            final_epoch = pd.to_datetime(
+                final_epoch.calendar_column_str_d(),
+                format="%Y %m %d %H %M %S.%f",
+            )
 
         self.initial_epoch = initial_epoch
         self.final_epoch = final_epoch
 
     def load_reference(self, filename, ref_mode, ref_type):
-        self.__init__(self._log_npt)
+        self.__init__()
         self.refMgr.reset(ref_mode, ref_type)
         self.refMgr.parse_ref_data(filename)
 
@@ -190,41 +181,39 @@ class RewardManager:
         base_data.set_index("RawEpoch", inplace=True)
         self.base_positions = base_data
 
-        self.log_baseline(self.base_data)
+        return self.log_baseline(self.base_data)
 
-    def limit_baseline_log(self, initial_epoch: GPS_Time, final_epoch: GPS_Time):
-        initial_epoch = pd.to_datetime(
-            initial_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
-        final_epoch = pd.to_datetime(
-            final_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
+    def limit_baseline_log(
+        self,
+        initial_epoch: Union[pd.Timestamp, GPS_Time],
+        final_epoch: Union[pd.Timestamp, GPS_Time],
+    ):
+        if isinstance(initial_epoch, GPS_Time):
+            initial_epoch = pd.to_datetime(
+                initial_epoch.calendar_column_str_d(),
+                format="%Y %m %d %H %M %S.%f",
+            )
+        if isinstance(final_epoch, GPS_Time):
+            final_epoch = pd.to_datetime(
+                final_epoch.calendar_column_str_d(),
+                format="%Y %m %d %H %M %S.%f",
+            )
 
         baseline = self.base_data[
             self.base_data["RawEpoch"].between(initial_epoch, final_epoch)
         ]
-        self.log_baseline(baseline)
+        return self.log_baseline(baseline)
 
-    def log_baseline(self, baseline, truncate=True):
-        if truncate and self._log_npt.exists(f"training/train/PE_Errors"):
-            del self._log_npt[f"training/train/PE_Errors"]
-
+    def log_baseline(self, baseline):
         pe_errors = {
+            "Epoch": baseline["RawEpoch"],
             "NorthError": baseline["NorthErrorProp"],
             "EastError": baseline["EastErrorProp"],
             "UpError": baseline["UpErrorProp"],
             "HorizontalError": baseline["HorizontalErrorProp"],
             "VerticalError": baseline["VerticalErrorProp"],
         }
-        if self._log_npt is not None and self._log_npt._mode != "debug":
-            self._log_npt[f"training/{self.scenario}/PE"].extend(
-                {k: v.to_list() for k, v in pe_errors.items()}
-            )
-            self._log_npt[f"training/train/PE_Errors"].extend(
-                {k: v.to_list() for k, v in pe_errors.items()}
-            )
+        return pe_errors
 
     def save_baseline(self, filename):
         self.base_data.to_parquet(filename)
@@ -243,9 +232,6 @@ class RewardManager:
             base_positions.set_index("RawEpoch", inplace=True)
             self.base_positions = pd.concat([self.base_positions, base_positions])
 
-            if self._log_npt.exists(f"training/train/PE_Errors"):
-                del self._log_npt[f"training/train/PE_Errors"]
-
             pe_errors = {
                 "NorthError": self.base_data["NorthErrorProp"],
                 "EastError": self.base_data["EastErrorProp"],
@@ -253,13 +239,8 @@ class RewardManager:
                 "HorizontalError": self.base_data["HorizontalErrorProp"],
                 "VerticalError": self.base_data["VerticalErrorProp"],
             }
-            if self._log_npt is not None and self._log_npt._mode != "debug":
-                self._log_npt[f"training/{self.scenario}/PE"].extend(
-                    {k: v.to_list() for k, v in pe_errors.items()}
-                )
-                self._log_npt[f"training/train/PE_Errors"].extend(
-                    {k: v.to_list() for k, v in pe_errors.items()}
-                )
+            return pe_errors
+        return None
 
     def compute_reward(self, ai_output: OutputStr):
         start = time.time()
@@ -314,13 +295,7 @@ class RewardManager:
                     "HorizontalError": ai_ref_df["HorizontalErrorProp"].iloc[-1],
                     "VerticalError": ai_ref_df["VerticalErrorProp"].iloc[-1],
                 }
-
-                self._log_npt[
-                    f"training/{self.scenario}/AI_generation{self.generation}"
-                ].extend({k: [v] for k, v in ai_errors.items()})
-                self._log_npt[f"training/train/AI_Errors"].extend(
-                    {k: [v] for k, v in ai_errors.items()}
-                )
+                self.log_data["ai_errors"].append(ai_errors)
 
                 self.ai_rmse_values.update(ai_rmse)
                 self.pe_rmse_values.update(pe_rmse)
@@ -331,10 +306,8 @@ class RewardManager:
                 else:
                     reward = -np.log(ai_rmse / (pe_rmse + 1e-6))
 
-                reward = np.tanh(reward)
-
             elif ai_ref_df is None and not pe_ref_df.empty:
-                reward = -1.0
+                reward = -10.0
 
             else:
                 reward = 0.0
@@ -347,29 +320,35 @@ class RewardManager:
             )
             reward = 0.0
 
+        reward = np.clip(reward, -10.0, 10.0)
         self.reward.update(reward)
 
-        running_reward = self.reward.get_running_value()
         instant_reward = self.reward.get_differentiated_value()
+        running_reward = self.reward.get_running_value()
         cummulative_reward = self.reward.get_cummulative_value()
 
         self._times["compute_reward"].append(time.time() - start)
 
-        self._log_npt[f"training/train/instant_running_reward"].append(running_reward)
-        self._log_npt[f"training/train/instant_reward"].append(instant_reward)
-        self._log_npt[f"training/train/cummulative_reward"].append(cummulative_reward)
+        self.log_data["instant_rewards"].append(instant_reward)
+        self.log_data["running_rewards"].append(running_reward)
+        self.log_data["cummulative_rewards"].append(cummulative_reward)
 
-        self._log_npt[
-            f"training/{self.scenario}/AI_generation{self.generation}/instant_running_reward"
-        ].append(running_reward)
-        self._log_npt[
-            f"training/{self.scenario}/AI_generation{self.generation}/instant_reward"
-        ].append(instant_reward)
-        self._log_npt[
-            f"training/{self.scenario}/AI_generation{self.generation}/cummulative_reward"
-        ].append(cummulative_reward)
+        return instant_reward
 
-        return self.reward.get_differentiated_value()
+    def get_log_data(self):
+        data = self.log_data.copy()
+
+        if "ai_errors" in data and isinstance(data["ai_errors"], list):
+            flattened_ai_errors = {}
+            for error_dict in data["ai_errors"]:
+                for key, value in error_dict.items():
+                    if key not in flattened_ai_errors:
+                        flattened_ai_errors[key] = []
+                    flattened_ai_errors[key].append(value)
+            data["ai_errors"] = flattened_ai_errors
+
+        self.log_data = {key: [] for key in self.log_data}
+        return data
 
     def _get_record_output(self, data: OutputStr) -> pd.DataFrame:
         record = {}
@@ -652,12 +631,8 @@ class RewardManager:
         ref_positions = self.ref_positions
         if hasattr(self, "initial_epoch") and hasattr(self, "final_epoch"):
             ref_positions = ref_positions[
-                ref_positions.index.isin(
-                    self.ref_positions[
-                        self.ref_positions.index.to_series().between(
-                            self.initial_epoch, self.final_epoch
-                        )
-                    ].index
+                ref_positions.index.to_series().between(
+                    self.initial_epoch, self.final_epoch
                 )
             ]
         self.ref_polyline = folium.PolyLine(
@@ -671,17 +646,13 @@ class RewardManager:
         base_positions = self.base_positions
         if hasattr(self, "initial_epoch") and hasattr(self, "final_epoch"):
             base_positions = base_positions[
-                base_positions.index.isin(
-                    self.base_positions[
-                        self.base_positions.index.to_series().between(
-                            self.initial_epoch, self.final_epoch
-                        )
-                    ].index
+                base_positions.index.to_series().between(
+                    self.initial_epoch, self.final_epoch
                 )
             ]
 
         self.base_polyline = folium.PolyLine(
-            self.base_positions.values.tolist(),
+            base_positions.values.tolist(),
             color="green",
             weight=2.5,
             opacity=1,
@@ -712,23 +683,26 @@ class RewardManager:
 
             self.last_ai_position_index = len(self.ai_positions)
 
-            self.map.save(self.output_path)
-            self._log_npt[f"training/train/map"].upload(self.output_path)
+            self.map.save(self.map_file)
 
-        return self.output_path
+        return self.map_file
 
-    def match_ref(self, epoch: GPS_Time):
-        raw_epoch = pd.to_datetime(
-            epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
+    def match_ref(self, epoch: Union[pd.Timestamp, GPS_Time]):
+        if isinstance(epoch, GPS_Time):
+            raw_epoch = pd.to_datetime(
+                epoch.calendar_column_str_d(),
+                format="%Y %m %d %H %M %S.%f",
+            )
+        else:
+            raw_epoch = epoch
+
         epoch = raw_epoch.round(freq="100ms")
 
         return self.reference_data["Epoch"].isin([epoch]).any()
 
     def check_reconvergence(self):
         """
-        Check if the current error (RMSE) exceeds 3σ
+        Check if the current error (RMSE) exceeds 3sigma
         (three standard deviations) from their respective means, indicating
         the need for reconvergence.
         """
@@ -762,3 +736,9 @@ class RewardManager:
             self.rmse_patience = 0
 
         return reconvergence_needed
+
+    def get_ai_positions(self):
+        return self.ai_positions
+
+    def get_reward_filepath(self):
+        return self.reward_rec.file_path
