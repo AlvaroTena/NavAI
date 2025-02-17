@@ -19,6 +19,9 @@ from rlnav.recorder.reward_recorder import RewardRecorder
 from rlnav.types.reference_types import ReferenceMode, ReferenceType
 from rlnav.types.running_metric import RunningMetric
 
+gps_start_date = pd.to_datetime("1980 1 6 0 0 0.000000", format="%Y %m %d %H %M %S.%f")
+
+
 transformer_model = pyproj.Transformer.from_crs(
     {"proj": "geocent", "ellps": "WGS84", "datum": "WGS84"},
     {"proj": "latlong", "ellps": "WGS84", "datum": "WGS84"},
@@ -233,6 +236,7 @@ class RewardManager:
             self.base_positions = pd.concat([self.base_positions, base_positions])
 
             pe_errors = {
+                "Epoch": self.base_data["RawEpoch"],
                 "NorthError": self.base_data["NorthErrorProp"],
                 "EastError": self.base_data["EastErrorProp"],
                 "UpError": self.base_data["UpErrorProp"],
@@ -289,6 +293,11 @@ class RewardManager:
                     ai_rmse = ai_rmse[-1]
 
                 ai_errors = {
+                    "Epoch": (
+                        ai_ref_df["RawEpoch"].iloc[-1]
+                        if ai_ref_df["RawEpoch"].iloc[-1] != gps_start_date
+                        else pe_ref_df["RawEpoch"].iloc[-1]
+                    ),
                     "NorthError": ai_ref_df["NorthErrorProp"].iloc[-1],
                     "EastError": ai_ref_df["EastErrorProp"].iloc[-1],
                     "UpError": ai_ref_df["UpErrorProp"].iloc[-1],
@@ -661,8 +670,8 @@ class RewardManager:
 
         folium.LayerControl(overlay=True).add_to(self.map)
 
-    def update_map(self):
-        if not self.map_initialized:
+    def update_map(self, reset=False):
+        if not self.map_initialized or reset:
             self._create_map()
 
         new_positions = self.ai_positions.iloc[

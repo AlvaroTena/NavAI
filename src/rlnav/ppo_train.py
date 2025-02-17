@@ -5,6 +5,7 @@ import signal
 import sys
 import time
 import warnings
+from typing import Any
 
 import neptune
 import numpy as np
@@ -14,7 +15,7 @@ from absl import logging as absl_logging
 from neptune_tensorboard import enable_tensorboard_logging
 from tf_agents.agents import tf_agent
 from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import parallel_py_environment, tf_py_environment
+from tf_agents.environments import tf_py_environment
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
 
@@ -23,6 +24,7 @@ from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
 from pewrapper.misc.version_wrapper_bin import RELEASE_INFO
 from rlnav.agent.ppo_agent import create_ppo_agent
+from rlnav.env.async_parallel_py_environment import AsyncParallelPyEnvironment
 from rlnav.env.pe_env import PE_Env, get_transformers_min_max
 from rlnav.env.wrapper import WrapperDataAttributeError
 from rlnav.managers.reward_mgr import RewardManager
@@ -115,16 +117,36 @@ class EnvCreator:
 
 
 def create_parallel_environment(
-    config,
-    wrapperMgr,
-    rewardMgr,
-    min_values,
-    max_values,
-    output_path,
-    num_parallel_environments,
-):
+    config: Any,
+    wrapperMgr: WrapperManager,
+    rewardMgr: RewardManager,
+    min_values: list,
+    max_values: list,
+    output_path: str,
+    num_parallel_environments: int,
+) -> Any:
     """
-    Crea un entorno paralelo utilizando ParallelPyEnvironment.
+    Creates a parallel environment using AsyncParallelPyEnvironment.
+
+    The function creates multiple environment instances using the provided
+    configuration, wrapper manager, and reward manager. Each instance is configured
+    with specific parameters and a unique output path. Finally, the parallel
+    environment is adapted to be TensorFlow compatible.
+
+    Args:
+        config (Any): Overall configuration settings.
+        wrapperMgr (WrapperManager): Manager object for wrappers and scenario generation.
+        rewardMgr (RewardManager): Manager object for reward handling.
+        min_values (list): Minimum boundary values for the environment.
+        max_values (list): Maximum boundary values for the environment.
+        output_path (str): Base directory path for saving outputs.
+        num_parallel_environments (int): Number of parallel environments to create.
+
+    Returns:
+        Any: A TensorFlow-compatible parallel environment.
+
+    Raises:
+        Exception: Propagates any exception that occurs during environment creation.
     """
     try:
         env_creators = [
@@ -143,13 +165,18 @@ def create_parallel_environment(
             for i in range(num_parallel_environments)
         ]
 
-        # Crear el entorno paralelo
-        parallel_env = parallel_py_environment.ParallelPyEnvironment(env_creators)
+        # Create the parallel environment
+        parallel_env = AsyncParallelPyEnvironment(env_creators)
 
-        # Convertir a entorno compatible con TensorFlow
+        # Convert to a TensorFlow-compatible environment
         return tf_py_environment.TFPyEnvironment(parallel_env)
+
     except Exception as e:
-        print(f"Error al inicializar entornos paralelos: {e}")
+        Logger.log_message(
+            Logger.Category.ERROR,
+            Logger.Module.MAIN,
+            f"Error initializing parallel environments: {e}",
+        )
         raise
 
 
@@ -281,34 +308,53 @@ def train_agent(
     kl_penalty_loss = RunningMetric()
     clip_fraction = RunningMetric()
 
-    # Configura el replay buffer y el driver.
-    replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
-        data_spec=agent.collect_data_spec,
-        batch_size=train_env.batch_size,
-        max_length=600,
-    )
+    max_steps = 600  # 10Hz * 60s = 600 steps
+    total_envs = train_env.num_envs
 
-    driver = dynamic_step_driver.DynamicStepDriver(
-        train_env,
-        agent.collect_policy,
-        observers=[replay_buffer.add_batch],
-        num_steps=600,
-    )
-
-    # Configura el checkpointer.
     checkpoint_dir = os.path.join(output_path, "checkpoints")
-    train_checkpointer = common.Checkpointer(
-        ckpt_dir=checkpoint_dir,
-        agent=agent,
-        policy=agent.policy,
-        replay_buffer=replay_buffer,
-        global_step=agent.train_step_counter,
-    )
 
-    # Restaurar desde el último checkpoint si existe.
-    train_checkpointer.initialize_or_restore()
+    if total_envs < 5:
+        active_flags = [True] * total_envs
+    else:
+        active_flags = [True] * 5 + [False] * (total_envs - 5)
 
-    while not all([sub_env.call("is_done")() for sub_env in train_env._envs]):
+    new_active_envs = train_env.set_active_envs(active_flags)
+    train_env._batch_size = train_env.pyenv.batch_size
+    train_env._time_step = train_env.pyenv.current_time_step()
+
+    envs_times = extract_computation_times(new_active_envs, envs_times)
+
+    envs_errors = {}
+
+    while not all(
+        (done_envs := [sub_env.call("is_done")() for sub_env in train_env.active_envs])
+    ):
+        for i, done in enumerate(done_envs):
+            if done and f"env_{i}" in envs_errors:
+                del envs_errors[f"env_{i}"]
+
+        replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
+            data_spec=agent.collect_data_spec,
+            batch_size=train_env.batch_size,
+            max_length=max_steps,
+        )
+
+        driver = dynamic_step_driver.DynamicStepDriver(
+            train_env,
+            agent.collect_policy,
+            observers=[replay_buffer.add_batch],
+            num_steps=max_steps * train_env.batch_size,
+        )
+
+        train_checkpointer = common.Checkpointer(
+            ckpt_dir=checkpoint_dir,
+            agent=agent,
+            policy=agent.policy,
+            replay_buffer=replay_buffer,
+            global_step=agent.train_step_counter,
+        )
+        train_checkpointer.initialize_or_restore()
+
         try:
             times = {}
 
@@ -324,10 +370,16 @@ def train_agent(
             if log_times:
                 npt_run["monitoring/times"].extend(remove_empty_lists(times))
 
-                envs_times = extract_computation_times(train_env._envs, envs_times)
+                envs_times = extract_computation_times(
+                    train_env.active_envs, envs_times
+                )
                 for time_key in envs_times:
                     fig_time = generate_times_plot(envs_times, time_key)
                     if npt_run._mode == "debug":
+                        os.makedirs(
+                            os.path.join(output_path, "Training_Tracing/times/"),
+                            exist_ok=True,
+                        )
                         fig_time.write_html(
                             os.path.join(
                                 output_path,
@@ -339,7 +391,16 @@ def train_agent(
                         fig_time, include_plotlyjs="cdn"
                     )
 
-            agent_stats = extract_agent_stats(train_env._envs, agent_stats)
+            agent_stats, raw_envs_errors = extract_agent_stats(
+                train_env.active_envs, agent_stats
+            )
+            for env, errors in raw_envs_errors.items():
+                errors.set_index("Epoch", inplace=True)
+
+                if env not in envs_errors:
+                    envs_errors[env] = errors
+                else:
+                    envs_errors[env] = pd.concat([envs_errors[env], errors])
 
             # Plotting agent rewards
             fig_rewards = generate_rewards_plot(
@@ -363,6 +424,26 @@ def train_agent(
             agent_errors = agent_stats["agent_errors"]
 
             ## H-V plot
+            for env, errors in envs_errors.items():
+                fig_HV = generate_HV_errors_plot(
+                    baseline_errors=baseline_errors,
+                    agent_errors=errors.to_dict("index"),
+                    combined=False,
+                )
+
+                if npt_run._mode == "debug":
+                    fig_HV.write_html(
+                        os.path.join(
+                            reward_manager.output_path, f"{env}", "HV_errors.html"
+                        )
+                    )
+                npt_run[f"training/train/{env}/HV"].upload(
+                    fig_HV, include_plotlyjs="cdn"
+                )
+                npt_run[
+                    f"training/{scenario}/AI_generation{generation}/{env}/HV"
+                ].upload(fig_HV, include_plotlyjs="cdn")
+
             fig_HV = generate_HV_errors_plot(
                 baseline_errors=baseline_errors,
                 agent_errors=agent_errors,
@@ -378,6 +459,23 @@ def train_agent(
             )
 
             ## NEU plot
+            for env, errors in envs_errors.items():
+                fig_NEU = generate_NEU_errors_plot(
+                    baseline_errors=baseline_errors,
+                    agent_errors=errors.to_dict("index"),
+                    combined=False,
+                )
+
+                if npt_run._mode == "debug":
+                    fig_NEU.write_html(
+                        os.path.join(
+                            reward_manager.output_path, f"{env}", "NEU_errors.html"
+                        )
+                    )
+                npt_run[
+                    f"training/{scenario}/AI_generation{generation}/{env}/NEU"
+                ].upload(fig_NEU, include_plotlyjs="cdn")
+
             fig_NEU = generate_NEU_errors_plot(
                 baseline_errors=baseline_errors,
                 agent_errors=agent_errors,
@@ -404,22 +502,15 @@ def train_agent(
             kl_penalty_loss.update(train_loss.extra.kl_penalty_loss.numpy())
             clip_fraction.update(train_loss.extra.clip_fraction.numpy())
 
-            train_metrics = {}
-            train_metrics["loss"] = loss.get_running_value()
-            train_metrics["policy_gradient_loss"] = (
-                policy_gradient_loss.get_running_value()
-            )
-            train_metrics["value_estimation_loss"] = (
-                value_estimation_loss.get_running_value()
-            )
-            train_metrics["l2_regularization_loss"] = (
-                l2_regularization_loss.get_running_value()
-            )
-            train_metrics["entropy_regularization_loss"] = (
-                entropy_regularization_loss.get_running_value()
-            )
-            train_metrics["kl_penalty_loss"] = kl_penalty_loss.get_running_value()
-            train_metrics["clip_fraction"] = clip_fraction.get_running_value()
+            train_metrics = {
+                "loss": loss.get_running_value(),
+                "policy_gradient_loss": policy_gradient_loss.get_running_value(),
+                "value_estimation_loss": value_estimation_loss.get_running_value(),
+                "l2_regularization_loss": l2_regularization_loss.get_running_value(),
+                "entropy_regularization_loss": entropy_regularization_loss.get_running_value(),
+                "kl_penalty_loss": kl_penalty_loss.get_running_value(),
+                "clip_fraction": clip_fraction.get_running_value(),
+            }
             training_recorder.record_metrics(train_metrics)
             npt_run["training/train"].extend({k: [v] for k, v in train_metrics.items()})
 
@@ -427,32 +518,23 @@ def train_agent(
 
             if agent.train_step_counter.numpy() % 10 == 0:
                 envs_positions = {}
-                for i, sub_env in enumerate(train_env._envs):
+                for i, sub_env in enumerate(train_env.active_envs):
                     sub_env.call("update_map")()
                     sub_env_position = sub_env.call("get_ai_positions")()
                     envs_positions.update({f"env_{i}": sub_env_position})
 
                 if envs_positions:
                     df_list = list(envs_positions.values())
-                    df_mean_positions = pd.DataFrame(
-                        {
-                            "LAT_PROP": np.mean(
-                                [df["LAT_PROP"] for df in df_list], axis=0
-                            ),
-                            "LON_PROP": np.mean(
-                                [df["LON_PROP"] for df in df_list], axis=0
-                            ),
-                        }
-                    )
-                    df_mean_positions.index = df_list[0].index
-                    reward_manager.ai_positions = pd.concat(
-                        [reward_manager.ai_positions, df_mean_positions]
-                    )
+                    df_all = pd.concat(df_list, axis=0)
+                    df_mean_positions = df_all.groupby(df_all.index).mean()[
+                        ["LAT_PROP", "LON_PROP"]
+                    ]
+                    reward_manager.ai_positions = df_mean_positions
 
-                map_file = reward_manager.update_map()
+                map_file = reward_manager.update_map(reset=True)
                 npt_run[f"training/train/map"].upload(map_file)
 
-                # Guardar un checkpoint.
+            # Guardar un checkpoint.
             if agent.train_step_counter.numpy() % 1000 == 0:
                 train_checkpointer.save(agent.train_step_counter.numpy())
                 if npt_run.exists(f"training/agent/checkpoint"):
@@ -462,10 +544,23 @@ def train_agent(
                         os.path.join(checkpoint_dir, checkpoint_file)
                     )
 
+            current_active = len(train_env.active_envs)
+            if current_active < total_envs:
+                additional = min(5, total_envs - current_active)
+                new_active_count = current_active + additional
+                active_flags = [True] * new_active_count + [False] * (
+                    total_envs - new_active_count
+                )
+                new_active_envs = train_env.set_active_envs(active_flags)
+                train_env._batch_size = train_env.pyenv.batch_size
+                train_env._time_step = train_env.pyenv.current_time_step()
+
+                envs_times = extract_computation_times(new_active_envs, envs_times)
+
         except WrapperDataAttributeError:
             pass
 
-    for i, sub_env in enumerate(train_env._envs):
+    for i, sub_env in enumerate(train_env.active_envs):
         map_file = sub_env.call("update_map")()
         npt_run[f"training/{scenario}/AI_generation{generation}/env_{i}/map"].upload(
             map_file
@@ -552,7 +647,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args(sys.argv[1:])
-    args.output_path = os.path.join(args.output_path)
+    args.output_path = os.path.normpath(os.path.join(args.output_path))
     sys.argv.insert(1, "--")  # This is needed to avoid absl flags parsing errors
 
     run = neptune.init_run(

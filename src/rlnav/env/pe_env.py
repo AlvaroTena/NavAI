@@ -102,14 +102,21 @@ class PE_Env(py_environment.PyEnvironment):
         self._times = {}
         self._times["reset_env"] = []
         self._times["step_env"] = []
+        if hasattr(self, "dataset"):
+            self.dataset.reset_times()
+        if hasattr(self, "wrapper") and self.wrapper is not None:
+            self.wrapper.reset_times()
+        if hasattr(self, "rewardMgr"):
+            self.rewardMgr.reset_times()
 
     def get_times(self):
+        if hasattr(self, "dataset"):
+            self._times.update(self.dataset.get_times())
+        self._times.update(self.wrapper.get_times())
+        self._times.update(self.rewardMgr.get_times())
+
         times = copy.deepcopy(self._times)
         self.reset_times()
-        if hasattr(self, "dataset"):
-            times.update(self.dataset.get_times())
-        times.update(self.wrapper.get_times())
-        times.update(self.rewardMgr.get_times())
         return times
 
     def action_spec(self):
