@@ -535,7 +535,7 @@ def train_agent(
                 npt_run[f"training/train/map"].upload(map_file)
 
             # Guardar un checkpoint.
-            if agent.train_step_counter.numpy() % 1000 == 0:
+            if agent.train_step_counter.numpy() % 50 == 0:
                 train_checkpointer.save(agent.train_step_counter.numpy())
                 if npt_run.exists(f"training/agent/checkpoint"):
                     del npt_run[f"training/agent/checkpoint"]

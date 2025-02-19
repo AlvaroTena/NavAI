@@ -3,6 +3,8 @@ from typing import Any, Dict
 import numpy as np
 import pandas as pd
 
+from navutils.logger import Logger
+
 
 def extract_computation_times(parallel_envs, envs_times):
     """
@@ -36,8 +38,32 @@ def extract_computation_times(parallel_envs, envs_times):
             if times_dict[time_key]  # Check not empty
         ]
 
-        mean_std[time_key]["mean"] = np.mean(values, axis=0).tolist() if values else []
-        mean_std[time_key]["std"] = np.std(values, axis=0).tolist() if values else []
+        try:
+            if not values:
+                Logger.log_message(
+                    Logger.Category.WARNING,
+                    Logger.Module.NONE,
+                    f"No values collected for key '{time_key}'",
+                )
+                mean_std[time_key]["mean"] = []
+                mean_std[time_key]["std"] = []
+            else:
+                # Determine the minimum length among all sequences and truncate them
+                min_len = min(len(v) for v in values)
+                values_truncated = [np.array(v)[:min_len] for v in values]
+
+                # Compute element-wise mean and standard deviation over truncated arrays
+                mean_std[time_key]["mean"] = np.mean(values_truncated, axis=0).tolist()
+                mean_std[time_key]["std"] = np.std(values_truncated, axis=0).tolist()
+
+        except Exception as e:
+            Logger.log_message(
+                Logger.Category.WARNING,
+                Logger.Module.NONE,
+                f"Error processing computation times for key '{time_key}': {e}",
+            )
+            mean_std[time_key]["mean"] = []
+            mean_std[time_key]["std"] = []
 
     for time_key, stats in mean_std.items():
         if time_key not in envs_times:
@@ -100,10 +126,38 @@ def extract_agent_stats(parallel_envs, agent_stats):
     for log_key in log_data[next(iter(log_data))]:
         if log_key != "ai_errors":
             mean_std[log_key] = {}
-            values = [log_dict[log_key] for log_dict in log_data.values()]
+            values = [
+                log_dict[log_key] for log_dict in log_data.values() if log_dict[log_key]
+            ]
 
-            mean_std[log_key]["mean"] = np.mean(values, axis=0).tolist()
-            mean_std[log_key]["std"] = np.std(values, axis=0).tolist()
+            try:
+                if not values:
+                    Logger.log_message(
+                        Logger.Category.WARNING,
+                        Logger.Module.NONE,
+                        f"No values collected for key '{log_key}'",
+                    )
+                    mean_std[log_key]["mean"] = []
+                    mean_std[log_key]["std"] = []
+                else:
+                    # Determine the minimum length among all sequences and truncate them
+                    min_len = min(len(v) for v in values)
+                    values_truncated = [np.array(v)[:min_len] for v in values]
+
+                    # Compute element-wise mean and standard deviation over truncated arrays
+                    mean_std[log_key]["mean"] = np.mean(
+                        values_truncated, axis=0
+                    ).tolist()
+                    mean_std[log_key]["std"] = np.std(values_truncated, axis=0).tolist()
+
+            except Exception as e:
+                Logger.log_message(
+                    Logger.Category.WARNING,
+                    Logger.Module.NONE,
+                    f"Error processing stats for key '{log_key}': {e}",
+                )
+                mean_std[log_key]["mean"] = []
+                mean_std[log_key]["std"] = []
 
     for metric_key, stats in mean_std.items():
         if metric_key != "AI_Errors" and metric_key not in agent_stats:
