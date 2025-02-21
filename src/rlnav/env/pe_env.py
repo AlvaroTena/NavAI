@@ -35,7 +35,7 @@ def get_transformers_min_max(transformers_path: str):
             return feature, df.min().min(), df.max().max()
         return feature, np.inf, -np.inf
 
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         results = executor.map(process_feature, const.PROCESSED_FEATURE_LIST)
 
     for feature, fmin, fmax in results:

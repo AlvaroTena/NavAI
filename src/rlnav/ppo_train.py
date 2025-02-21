@@ -326,13 +326,7 @@ def train_agent(
 
     envs_errors = {}
 
-    while not all(
-        (done_envs := [sub_env.call("is_done")() for sub_env in train_env.active_envs])
-    ):
-        for i, done in enumerate(done_envs):
-            if done and f"env_{i}" in envs_errors:
-                del envs_errors[f"env_{i}"]
-
+    while not all([sub_env.call("is_done")() for sub_env in train_env.active_envs]):
         replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
             data_spec=agent.collect_data_spec,
             batch_size=train_env.batch_size,
@@ -346,14 +340,15 @@ def train_agent(
             num_steps=max_steps * train_env.batch_size,
         )
 
-        train_checkpointer = common.Checkpointer(
-            ckpt_dir=checkpoint_dir,
-            agent=agent,
-            policy=agent.policy,
-            replay_buffer=replay_buffer,
-            global_step=agent.train_step_counter,
-        )
-        train_checkpointer.initialize_or_restore()
+        if len(train_env.active_envs) == total_envs:
+            train_checkpointer = common.Checkpointer(
+                ckpt_dir=checkpoint_dir,
+                agent=agent,
+                policy=agent.policy,
+                replay_buffer=replay_buffer,
+                global_step=agent.train_step_counter,
+            )
+            train_checkpointer.initialize_or_restore()
 
         try:
             times = {}
@@ -387,9 +382,11 @@ def train_agent(
                                 f"times_{time_key}.html",
                             )
                         )
-                    npt_run[f"monitoring/times/{time_key}"].upload(
-                        fig_time, include_plotlyjs="cdn"
-                    )
+
+                    else:
+                        npt_run[f"monitoring/times/{time_key}"].upload(
+                            fig_time, include_plotlyjs="cdn"
+                        )
 
             agent_stats, raw_envs_errors = extract_agent_stats(
                 train_env.active_envs, agent_stats
@@ -400,7 +397,15 @@ def train_agent(
                 if env not in envs_errors:
                     envs_errors[env] = errors
                 else:
-                    envs_errors[env] = pd.concat([envs_errors[env], errors])
+                    duplicated_epochs = errors.index.intersection(
+                        envs_errors[env].index
+                    )
+                    if not duplicated_epochs.empty:
+                        envs_errors[env].drop(duplicated_epochs, inplace=True)
+
+                    envs_errors[env] = pd.concat(
+                        [envs_errors[env], errors]
+                    ).sort_index()
 
             # Plotting agent rewards
             fig_rewards = generate_rewards_plot(
@@ -410,12 +415,14 @@ def train_agent(
                 fig_rewards.write_html(
                     os.path.join(reward_manager.output_path, "rewards.html")
                 )
-            npt_run["training/train/rewards"].upload(
-                fig_rewards, include_plotlyjs="cdn"
-            )
-            npt_run[f"training/{scenario}/AI_generation{generation}/rewards"].upload(
-                fig_rewards, include_plotlyjs="cdn"
-            )
+
+            else:
+                npt_run["training/train/rewards"].upload(
+                    fig_rewards, include_plotlyjs="cdn"
+                )
+                npt_run[
+                    f"training/{scenario}/AI_generation{generation}/rewards"
+                ].upload(fig_rewards, include_plotlyjs="cdn")
 
             # Plotting agent vs baseline errors
             baseline_errors = reward_manager.limit_baseline_log(
@@ -437,12 +444,13 @@ def train_agent(
                             reward_manager.output_path, f"{env}", "HV_errors.html"
                         )
                     )
-                npt_run[f"training/train/{env}/HV"].upload(
-                    fig_HV, include_plotlyjs="cdn"
-                )
-                npt_run[
-                    f"training/{scenario}/AI_generation{generation}/{env}/HV"
-                ].upload(fig_HV, include_plotlyjs="cdn")
+                else:
+                    npt_run[f"training/train/{env}/HV"].upload(
+                        fig_HV, include_plotlyjs="cdn"
+                    )
+                    npt_run[
+                        f"training/{scenario}/AI_generation{generation}/{env}/HV"
+                    ].upload(fig_HV, include_plotlyjs="cdn")
 
             fig_HV = generate_HV_errors_plot(
                 baseline_errors=baseline_errors,
@@ -453,10 +461,12 @@ def train_agent(
                 fig_HV.write_html(
                     os.path.join(reward_manager.output_path, "HV_errors.html")
                 )
-            npt_run[f"training/train/HV"].upload(fig_HV, include_plotlyjs="cdn")
-            npt_run[f"training/{scenario}/AI_generation{generation}/HV"].upload(
-                fig_HV, include_plotlyjs="cdn"
-            )
+
+            else:
+                npt_run[f"training/train/HV"].upload(fig_HV, include_plotlyjs="cdn")
+                npt_run[f"training/{scenario}/AI_generation{generation}/HV"].upload(
+                    fig_HV, include_plotlyjs="cdn"
+                )
 
             ## NEU plot
             for env, errors in envs_errors.items():
@@ -472,9 +482,11 @@ def train_agent(
                             reward_manager.output_path, f"{env}", "NEU_errors.html"
                         )
                     )
-                npt_run[
-                    f"training/{scenario}/AI_generation{generation}/{env}/NEU"
-                ].upload(fig_NEU, include_plotlyjs="cdn")
+
+                else:
+                    npt_run[
+                        f"training/{scenario}/AI_generation{generation}/{env}/NEU"
+                    ].upload(fig_NEU, include_plotlyjs="cdn")
 
             fig_NEU = generate_NEU_errors_plot(
                 baseline_errors=baseline_errors,
@@ -485,10 +497,12 @@ def train_agent(
                 fig_NEU.write_html(
                     os.path.join(reward_manager.output_path, "NEU_errors.html")
                 )
-            npt_run[f"training/train/NEU"].upload(fig_NEU, include_plotlyjs="cdn")
-            npt_run[f"training/{scenario}/AI_generation{generation}/NEU"].upload(
-                fig_NEU, include_plotlyjs="cdn"
-            )
+
+            else:
+                npt_run[f"training/train/NEU"].upload(fig_NEU, include_plotlyjs="cdn")
+                npt_run[f"training/{scenario}/AI_generation{generation}/NEU"].upload(
+                    fig_NEU, include_plotlyjs="cdn"
+                )
 
             loss.update(train_loss.loss.numpy())
             policy_gradient_loss.update(train_loss.extra.policy_gradient_loss.numpy())
@@ -535,14 +549,15 @@ def train_agent(
                 npt_run[f"training/train/map"].upload(map_file)
 
             # Guardar un checkpoint.
-            if agent.train_step_counter.numpy() % 50 == 0:
+            if len(train_env.active_envs) < total_envs:
                 train_checkpointer.save(agent.train_step_counter.numpy())
-                if npt_run.exists(f"training/agent/checkpoint"):
-                    del npt_run[f"training/agent/checkpoint"]
-                for checkpoint_file in os.listdir(checkpoint_dir):
-                    npt_run[f"training/agent/checkpoint/{checkpoint_file}"].upload(
-                        os.path.join(checkpoint_dir, checkpoint_file)
-                    )
+                if agent.train_step_counter.numpy() % 50 == 0:
+                    if npt_run.exists(f"training/agent/checkpoint"):
+                        del npt_run[f"training/agent/checkpoint"]
+                    for checkpoint_file in os.listdir(checkpoint_dir):
+                        npt_run[f"training/agent/checkpoint/{checkpoint_file}"].upload(
+                            os.path.join(checkpoint_dir, checkpoint_file)
+                        )
 
             current_active = len(train_env.active_envs)
             if current_active < total_envs:
