@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import shutil
 import signal
 import sys
 import time
@@ -12,16 +13,10 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from absl import logging as absl_logging
-from neptune_tensorboard import enable_tensorboard_logging
-from tf_agents.agents import tf_agent
-from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import tf_py_environment
-from tf_agents.replay_buffers import tf_uniform_replay_buffer
-from tf_agents.utils import common
-
 from navutils.config import load_config
 from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
+from neptune_tensorboard import enable_tensorboard_logging
 from pewrapper.misc.version_wrapper_bin import RELEASE_INFO
 from rlnav.agent.ppo_agent import create_ppo_agent
 from rlnav.env.async_parallel_py_environment import AsyncParallelPyEnvironment
@@ -38,6 +33,11 @@ from rlnav.reports.rewards_visualizations import generate_rewards_plot
 from rlnav.reports.times_visualization import generate_times_plot
 from rlnav.types.running_metric import RunningMetric
 from rlnav.utils.envs_monitoring import extract_agent_stats, extract_computation_times
+from tf_agents.agents import tf_agent
+from tf_agents.drivers import dynamic_step_driver
+from tf_agents.environments import tf_py_environment
+from tf_agents.replay_buffers import tf_uniform_replay_buffer
+from tf_agents.utils import common
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -255,6 +255,7 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                     baseRewardMgr,
                     scenario,
                     generation,
+                    config.training.active_environments_per_iteration,
                     npt_run,
                     config.neptune.monitoring_times,
                     envs_times,
@@ -293,6 +294,7 @@ def train_agent(
     reward_manager: RewardManager,
     scenario: str,
     generation: int,
+    active_environments_per_iteration: int,
     npt_run: neptune.Run,
     log_times: bool,
     envs_times: dict,
@@ -313,10 +315,12 @@ def train_agent(
 
     checkpoint_dir = os.path.join(output_path, "checkpoints")
 
-    if total_envs < 5:
+    if total_envs < active_environments_per_iteration:
         active_flags = [True] * total_envs
     else:
-        active_flags = [True] * 5 + [False] * (total_envs - 5)
+        active_flags = [True] * active_environments_per_iteration + [False] * (
+            total_envs - active_environments_per_iteration
+        )
 
     new_active_envs = train_env.set_active_envs(active_flags)
     train_env._batch_size = train_env.pyenv.batch_size
@@ -340,7 +344,14 @@ def train_agent(
             num_steps=max_steps * train_env.batch_size,
         )
 
-        if len(train_env.active_envs) == total_envs:
+        enable_checkpoint = len(train_env.active_envs) == total_envs
+        if enable_checkpoint:
+            backup_dir = checkpoint_dir + "_bkp"
+            if os.path.exists(checkpoint_dir) and os.listdir(checkpoint_dir):
+                shutil.copytree(checkpoint_dir, backup_dir)
+                shutil.rmtree(checkpoint_dir)
+
+            os.makedirs(checkpoint_dir, exist_ok=True)
             train_checkpointer = common.Checkpointer(
                 ckpt_dir=checkpoint_dir,
                 agent=agent,
@@ -549,7 +560,7 @@ def train_agent(
                 npt_run[f"training/train/map"].upload(map_file)
 
             # Guardar un checkpoint.
-            if len(train_env.active_envs) < total_envs:
+            if enable_checkpoint:
                 train_checkpointer.save(agent.train_step_counter.numpy())
                 if agent.train_step_counter.numpy() % 50 == 0:
                     if npt_run.exists(f"training/agent/checkpoint"):
@@ -561,7 +572,9 @@ def train_agent(
 
             current_active = len(train_env.active_envs)
             if current_active < total_envs:
-                additional = min(5, total_envs - current_active)
+                additional = min(
+                    active_environments_per_iteration, total_envs - current_active
+                )
                 new_active_count = current_active + additional
                 active_flags = [True] * new_active_count + [False] * (
                     total_envs - new_active_count

@@ -13,6 +13,7 @@ scenarios:
   skip_first: 0
   n_generations: 10
   subscenarios: [
+    # scenario_931_000_GPSGALBDS_CSIRELAND_L1L2_KINEMATIC_20231003_00_DEBUG,
     # scenario_931_000_GPSGALBDS_CSIRELAND_L1L2_KINEMATIC_20231003_01_LOWH_LOWV, # No reference data
     scenario_931_000_GPSGALBDS_CSIRELAND_L1L2_KINEMATIC_20231003_03_LOWH_LOWV,
     scenario_931_000_GPSGALBDS_CSIRELAND_L1L2_KINEMATIC_20231003_05_LOWH_LOWV,
@@ -34,6 +35,7 @@ transformed_data:
 
 training:
   num_parallel_environments: 20
+  active_environments_per_iteration: 5
   rnn:
     enable: True
     window_size: 1
