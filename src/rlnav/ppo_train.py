@@ -13,10 +13,16 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from absl import logging as absl_logging
+from neptune_tensorboard import enable_tensorboard_logging
+from tf_agents.agents import tf_agent
+from tf_agents.drivers import dynamic_step_driver
+from tf_agents.environments import tf_py_environment
+from tf_agents.replay_buffers import tf_uniform_replay_buffer
+from tf_agents.utils import common
+
 from navutils.config import load_config
 from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
-from neptune_tensorboard import enable_tensorboard_logging
 from pewrapper.misc.version_wrapper_bin import RELEASE_INFO
 from rlnav.agent.ppo_agent import create_ppo_agent
 from rlnav.env.async_parallel_py_environment import AsyncParallelPyEnvironment
@@ -33,11 +39,6 @@ from rlnav.reports.rewards_visualizations import generate_rewards_plot
 from rlnav.reports.times_visualization import generate_times_plot
 from rlnav.types.running_metric import RunningMetric
 from rlnav.utils.envs_monitoring import extract_agent_stats, extract_computation_times
-from tf_agents.agents import tf_agent
-from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import tf_py_environment
-from tf_agents.replay_buffers import tf_uniform_replay_buffer
-from tf_agents.utils import common
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -348,7 +349,7 @@ def train_agent(
         if enable_checkpoint:
             backup_dir = checkpoint_dir + "_bkp"
             if os.path.exists(checkpoint_dir) and os.listdir(checkpoint_dir):
-                shutil.copytree(checkpoint_dir, backup_dir)
+                shutil.copytree(checkpoint_dir, backup_dir, dirs_exist_ok=True)
                 shutil.rmtree(checkpoint_dir)
 
             os.makedirs(checkpoint_dir, exist_ok=True)
