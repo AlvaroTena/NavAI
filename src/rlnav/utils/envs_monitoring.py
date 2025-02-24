@@ -50,7 +50,12 @@ def extract_computation_times(parallel_envs, envs_times):
             else:
                 # Determine the minimum length among all sequences and truncate them
                 min_len = min(len(v) for v in values)
-                values_truncated = [np.array(v)[:min_len] for v in values]
+                values_truncated = [
+                    np.array(v)[:min_len]
+                    for v in values
+                    if isinstance(v, (list, np.ndarray))
+                    and all(isinstance(x, (int, float)) for x in v)
+                ]
 
                 # Compute element-wise mean and standard deviation over truncated arrays
                 mean_std[time_key]["mean"] = np.mean(values_truncated, axis=0).tolist()
@@ -99,7 +104,11 @@ def extract_agent_stats(parallel_envs, agent_stats):
     }
 
     mean_std = {}
-    dfs = [pd.DataFrame(env_log["ai_errors"]) for env_log in log_data.values()]
+    dfs = [
+        pd.DataFrame(env_log["ai_errors"])
+        for env_log in log_data.values()
+        if "ai_errors" in env_log
+    ]
     all_data = pd.concat(dfs, ignore_index=True)
 
     aggregated_stats = all_data.groupby("Epoch").agg(
@@ -142,7 +151,12 @@ def extract_agent_stats(parallel_envs, agent_stats):
                 else:
                     # Determine the minimum length among all sequences and truncate them
                     min_len = min(len(v) for v in values)
-                    values_truncated = [np.array(v)[:min_len] for v in values]
+                    values_truncated = [
+                        np.array(v)[:min_len]
+                        for v in values
+                        if isinstance(v, (list, np.ndarray))
+                        and all(isinstance(x, (int, float)) for x in v)
+                    ]
 
                     # Compute element-wise mean and standard deviation over truncated arrays
                     mean_std[log_key]["mean"] = np.mean(
@@ -215,8 +229,8 @@ def merge_agent_errors(
                 old_stat_dict = merged_errors[epoch][error_key]
 
                 if "mean" in new_stat_dict and "mean" in old_stat_dict:
-                    old_mean = np.array(old_stat_dict["mean"])
-                    new_mean = np.array(new_stat_dict["mean"])
+                    old_mean = np.array(old_stat_dict.get("mean", []))
+                    new_mean = np.array(new_stat_dict.get("mean", []))
                     combined_mean = ((old_mean + new_mean) / 2.0).tolist()
                     merged_errors[epoch][error_key]["mean"] = combined_mean
 
@@ -226,8 +240,8 @@ def merge_agent_errors(
                     and "mean" in new_stat_dict
                     and "mean" in old_stat_dict
                 ):
-                    old_std = np.array(old_stat_dict["std"])
-                    new_std = np.array(new_stat_dict["std"])
+                    old_std = np.array(old_stat_dict.get("std", []))
+                    new_std = np.array(new_stat_dict.get("std", []))
 
                     combined_var = ((old_std**2 + new_std**2) / 2.0) + (
                         ((old_mean - new_mean) ** 2) / 4.0
@@ -237,11 +251,11 @@ def merge_agent_errors(
 
                 if "max" in new_stat_dict and "max" in old_stat_dict:
                     merged_errors[epoch][error_key]["max"] = np.maximum(
-                        np.array(old_stat_dict["max"]), np.array(new_stat_dict["max"])
+                        np.array(old_stat_dict.get("max", [])), np.array(new_stat_dict.get("max", []))
                     ).tolist()
                 if "min" in new_stat_dict and "min" in old_stat_dict:
                     merged_errors[epoch][error_key]["min"] = np.minimum(
-                        np.array(old_stat_dict["min"]), np.array(new_stat_dict["min"])
+                        np.array(old_stat_dict.get("min", [])), np.array(new_stat_dict.get("min", []))
                     ).tolist()
         else:
             # If the epoch doesn't exist in merged_errors, add it directly.

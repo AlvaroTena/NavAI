@@ -7,7 +7,7 @@ from tf_agents.environments.parallel_py_environment import (
 )
 
 
-class AsyncParallelPyEnvironment(ParallelPyEnvironment):
+class CascadeParallelPyEnvironment(ParallelPyEnvironment):
     """
     An asynchronous parallel environment that extends the base parallel environment.
     This class manages multiple simulation environments concurrently and allows for selective activation
@@ -22,7 +22,7 @@ class AsyncParallelPyEnvironment(ParallelPyEnvironment):
         blocking: bool = False,
         flatten: bool = False,
     ):
-        super(AsyncParallelPyEnvironment, self).__init__(
+        super(CascadeParallelPyEnvironment, self).__init__(
             env_constructors, start_serially, blocking, flatten
         )
         self._active_envs_mask = [False] * len(self._envs)
@@ -129,7 +129,7 @@ class AsyncParallelPyEnvironment(ParallelPyEnvironment):
         ]
         if len(active_actions) != len(active_indices):
             raise ValueError(
-                "El número de acciones ({}) no coincide con el número de entornos activos ({}).".format(
+                "The number of actions ({}) does not match the number of active environments ({}).".format(
                     len(active_actions), len(active_indices)
                 )
             )

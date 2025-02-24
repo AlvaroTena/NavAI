@@ -15,7 +15,6 @@ import tensorflow as tf
 from absl import logging as absl_logging
 from neptune_tensorboard import enable_tensorboard_logging
 from tf_agents.agents import tf_agent
-from tf_agents.drivers import dynamic_step_driver
 from tf_agents.environments import tf_py_environment
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
@@ -25,7 +24,9 @@ from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
 from pewrapper.misc.version_wrapper_bin import RELEASE_INFO
 from rlnav.agent.ppo_agent import create_ppo_agent
-from rlnav.env.async_parallel_py_environment import AsyncParallelPyEnvironment
+from rlnav.data.experience import pad_batch
+from rlnav.drivers.dynamic_step_driver_opt import DynamicStepDriverOpt
+from rlnav.env.cascade_parallel_py_environment import CascadeParallelPyEnvironment
 from rlnav.env.pe_env import PE_Env, get_transformers_min_max
 from rlnav.env.wrapper import WrapperDataAttributeError
 from rlnav.managers.reward_mgr import RewardManager
@@ -127,7 +128,7 @@ def create_parallel_environment(
     num_parallel_environments: int,
 ) -> Any:
     """
-    Creates a parallel environment using AsyncParallelPyEnvironment.
+    Creates a parallel environment using CascadeParallelPyEnvironment.
 
     The function creates multiple environment instances using the provided
     configuration, wrapper manager, and reward manager. Each instance is configured
@@ -167,7 +168,7 @@ def create_parallel_environment(
         ]
 
         # Create the parallel environment
-        parallel_env = AsyncParallelPyEnvironment(env_creators)
+        parallel_env = CascadeParallelPyEnvironment(env_creators)
 
         # Convert to a TensorFlow-compatible environment
         return tf_py_environment.TFPyEnvironment(parallel_env)
@@ -311,10 +312,40 @@ def train_agent(
     kl_penalty_loss = RunningMetric()
     clip_fraction = RunningMetric()
 
-    max_steps = 600  # 10Hz * 60s = 600 steps
+    max_steps_per_env = 600  # 10Hz * 60s = 600 steps
     total_envs = train_env.num_envs
 
-    checkpoint_dir = os.path.join(output_path, "checkpoints")
+    replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
+        data_spec=agent.collect_data_spec,
+        batch_size=total_envs,
+        max_length=max_steps_per_env,
+    )
+
+    def custom_add_batch(experience):
+        active_count = train_env.batch_size
+
+        active_mask = [True] * active_count + [False] * (total_envs - active_count)
+        padded_experience = pad_batch(experience, active_mask, total_envs)
+
+        replay_buffer.add_batch(padded_experience)
+
+    driver = DynamicStepDriverOpt(
+        train_env,
+        agent.collect_policy,
+        observers=[custom_add_batch],
+    )
+
+    os.makedirs(
+        (checkpoint_dir := os.path.join(output_path, "checkpoints")), exist_ok=True
+    )
+    train_checkpointer = common.Checkpointer(
+        ckpt_dir=checkpoint_dir,
+        agent=agent,
+        policy=agent.policy,
+        replay_buffer=replay_buffer,
+        global_step=agent.train_step_counter,
+    )
+    train_checkpointer.initialize_or_restore()
 
     if total_envs < active_environments_per_iteration:
         active_flags = [True] * total_envs
@@ -331,36 +362,17 @@ def train_agent(
 
     envs_errors = {}
 
+    if not train_env.active_envs:
+        Logger.log_message(
+            Logger.Category.ERROR,
+            Logger.Module.MAIN,
+            "No active environments found. Exiting training loop.",
+        )
+        return envs_times, agent_stats
+
     while not all([sub_env.call("is_done")() for sub_env in train_env.active_envs]):
-        replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
-            data_spec=agent.collect_data_spec,
-            batch_size=train_env.batch_size,
-            max_length=max_steps,
-        )
-
-        driver = dynamic_step_driver.DynamicStepDriver(
-            train_env,
-            agent.collect_policy,
-            observers=[replay_buffer.add_batch],
-            num_steps=max_steps * train_env.batch_size,
-        )
-
+        driver._num_steps = max_steps_per_env * train_env.batch_size
         enable_checkpoint = len(train_env.active_envs) == total_envs
-        if enable_checkpoint:
-            backup_dir = checkpoint_dir + "_bkp"
-            if os.path.exists(checkpoint_dir) and os.listdir(checkpoint_dir):
-                shutil.copytree(checkpoint_dir, backup_dir, dirs_exist_ok=True)
-                shutil.rmtree(checkpoint_dir)
-
-            os.makedirs(checkpoint_dir, exist_ok=True)
-            train_checkpointer = common.Checkpointer(
-                ckpt_dir=checkpoint_dir,
-                agent=agent,
-                policy=agent.policy,
-                replay_buffer=replay_buffer,
-                global_step=agent.train_step_counter,
-            )
-            train_checkpointer.initialize_or_restore()
 
         try:
             times = {}
@@ -370,8 +382,17 @@ def train_agent(
             times.update({"envs_collect": [time.time() - start]})
 
             start = time.time()
-            experience = replay_buffer.gather_all()
-            train_loss = agent.train(experience)
+            dataset = replay_buffer.as_dataset(
+                single_deterministic_pass=True,
+                num_steps=max_steps_per_env,
+                sample_batch_size=total_envs,
+            )
+            experience, info = next(iter(dataset))
+            active_count = train_env.batch_size
+            experience_filtered = tf.nest.map_structure(
+                lambda t: t[:active_count], experience
+            )
+            train_loss = agent.train(experience_filtered)
             times.update({"agent_train": [time.time() - start]})
 
             if log_times:
