@@ -14,7 +14,7 @@ def generate_rewards_plot(rewards):
     ----------
     rewards : dict
         A dictionary containing 'instant_rewards', 'running_rewards', and
-        'cummulative_rewards', each with 'mean' and 'std' keys representing
+        'cumulative_rewards', each with 'mean' and 'std' keys representing
         the respective reward statistics.
 
     Returns
@@ -105,8 +105,8 @@ def generate_rewards_plot(rewards):
     ### Cummulative Rewards
     fig.add_trace(
         go.Scatter(
-            x=np.arange(len(rewards["cummulative_rewards"]["mean"])),
-            y=rewards["cummulative_rewards"]["mean"],
+            x=np.arange(len(rewards["cumulative_rewards"]["mean"])),
+            y=rewards["cumulative_rewards"]["mean"],
             mode="lines",
             line=dict(color="DarkOrange"),
             name="Cummulative Reward",
@@ -115,9 +115,9 @@ def generate_rewards_plot(rewards):
     )
     fig.add_trace(
         go.Scatter(
-            x=np.arange(len(rewards["cummulative_rewards"]["std"])),
-            y=np.array(rewards["cummulative_rewards"]["mean"])
-            + np.array(rewards["cummulative_rewards"]["std"]),
+            x=np.arange(len(rewards["cumulative_rewards"]["std"])),
+            y=np.array(rewards["cumulative_rewards"]["mean"])
+            + np.array(rewards["cumulative_rewards"]["std"]),
             mode="lines",
             line=dict(color="orange", width=0),
             fillcolor="rgba(255,140,0,0.2)",
@@ -128,9 +128,9 @@ def generate_rewards_plot(rewards):
     )
     fig.add_trace(
         go.Scatter(
-            x=np.arange(len(rewards["cummulative_rewards"]["std"])),
-            y=np.array(rewards["cummulative_rewards"]["mean"])
-            - np.array(rewards["cummulative_rewards"]["std"]),
+            x=np.arange(len(rewards["cumulative_rewards"]["std"])),
+            y=np.array(rewards["cumulative_rewards"]["mean"])
+            - np.array(rewards["cumulative_rewards"]["std"]),
             mode="lines",
             line=dict(color="orange", width=0),
             fillcolor="rgba(255,140,0,0.2)",
