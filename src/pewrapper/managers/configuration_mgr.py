@@ -940,18 +940,12 @@ class ConfigurationManager(metaclass=Singleton):
             config_copy.use_AI_multipath = use_ai_multipath
 
             if use_ai_multipath:
-                path_suffix = "AI"
-
-                if generation is not None:
-                    path_suffix = f"AI_generation{generation}"
-
                 config_copy.log_path = os.path.join(
                     (
                         config_copy.log_path.decode("utf-8")
                         if base_path is None
                         else base_path
-                    ),
-                    path_suffix,
+                    )
                 ).encode("utf-8")
 
             else:

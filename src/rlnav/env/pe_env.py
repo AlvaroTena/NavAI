@@ -35,7 +35,7 @@ def get_transformers_min_max(transformers_path: str):
             return feature, df.min().min(), df.max().max()
         return feature, np.inf, -np.inf
 
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         results = executor.map(process_feature, const.PROCESSED_FEATURE_LIST)
 
     for feature, fmin, fmax in results:
@@ -102,14 +102,23 @@ class PE_Env(py_environment.PyEnvironment):
         self._times = {}
         self._times["reset_env"] = []
         self._times["step_env"] = []
+        if hasattr(self, "dataset"):
+            self.dataset.reset_times()
+        if self.wrapper is not None and hasattr(self.wrapper, "reset_times"):
+            self.wrapper.reset_times()
+        if hasattr(self.rewardMgr, "reset_times"):
+            self.rewardMgr.reset_times()
 
     def get_times(self):
+        if hasattr(self, "dataset"):
+            self._times.update(self.dataset.get_times())
+        if hasattr(self.wrapper, "get_times"):
+            self._times.update(self.wrapper.get_times())
+        if hasattr(self.rewardMgr, "get_times"):
+            self._times.update(self.rewardMgr.get_times())
+
         times = copy.deepcopy(self._times)
         self.reset_times()
-        if hasattr(self, "dataset"):
-            times.update(self.dataset.get_times())
-        times.update(self.wrapper.get_times())
-        times.update(self.rewardMgr.get_times())
         return times
 
     def action_spec(self):
