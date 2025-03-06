@@ -1,7 +1,5 @@
 import tensorflow as tf
-from rlnav.networks.actor_distribution_rnn_mask_network import (
-    ActorDistributionRnnMaskNetwork,
-)
+from rlnav.networks import actor_distribution_rnn_mask_network
 from tf_agents.networks import (
     actor_distribution_network,
     value_network,
@@ -37,7 +35,7 @@ def create_actor_rnn_net(
     lstm_size=(64, 32),
     output_fc_layer_params=(64, 128),
 ):
-    actor_net = ActorDistributionRnnMaskNetwork(
+    actor_net = actor_distribution_rnn_mask_network.ActorDistributionRnnMaskNetwork(
         observation_spec,
         action_spec,
         input_fc_layer_params=input_fc_layer_params,
