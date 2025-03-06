@@ -13,32 +13,35 @@ from tf_agents.typing import types
 from tf_agents.utils import common, tensor_normalizer
 
 
-def build_mask_for_heads(mask_bin):
+def build_mask_for_heads(mask_bin: tf.Tensor) -> tf.Tensor:
     """
     Constructs a mask for each satellite head based on the input binary mask.
 
     Args:
-        mask_bin (tf.Tensor): A tensor of shape (B, 286) or (B, T, 286) with 0/1 indicating if satellite i is available.
+        mask_bin (tf.Tensor): A tensor of shape (B, 286) or (B, T, 286) with 0/1
+                               indicating if satellite i is available.
     Returns:
-        tuple: A tuple of length 286. Each element is a tensor of shape (B, 2) or (B, T, 2).
+        tf.Tensor: A tensor of shape (B, 286, 2) or (B, T, 286, 2).
+                   The last dimension contains [True, mask_value] for each satellite.
+
+    Raises:
+        ValueError: If mask_bin is not of rank 2 or 3.
     """
     rank = tf.rank(mask_bin)
-    squeeze_axis = None
-    if rank == 2:
-        mask_bin = mask_bin[:, tf.newaxis, :]
-        squeeze_axis = 1
 
-    mask_bin_per_sat = tf.unstack(mask_bin, axis=-1)
-    heads_mask_list = []
-    for sat_mask_b in mask_bin_per_sat:
-        valid_sat = tf.cast(sat_mask_b, tf.bool)[..., tf.newaxis]
-        all_true = tf.ones_like(valid_sat, dtype=tf.bool)
-        sat_mask_2 = tf.concat([all_true, valid_sat], axis=-1)
-        if squeeze_axis is not None:
-            sat_mask_2 = tf.squeeze(sat_mask_2, axis=squeeze_axis)
-        heads_mask_list.append(sat_mask_2)
+    if rank not in (2, 3):
+        raise ValueError("mask_bin must be of rank 2 or 3.")
 
-    return tuple(heads_mask_list)
+    # Convert binary mask to boolean and add a dimension
+    valid_sat = tf.cast(mask_bin, tf.bool)[
+        ..., tf.newaxis
+    ]  # (B, 286, 1) or (B, T, 286, 1)
+
+    # Create tensor of all True values with same shape
+    all_true = tf.ones_like(valid_sat, dtype=tf.bool)
+
+    # Concatenate to create final mask
+    return tf.concat([all_true, valid_sat], axis=-1)
 
 
 def splitter(

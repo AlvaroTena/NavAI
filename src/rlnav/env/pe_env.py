@@ -72,11 +72,12 @@ class PE_Env(py_environment.PyEnvironment):
 
         self.wrapper = None
 
-        self._action_spec = tuple(
-            array_spec.BoundedArraySpec(
-                shape=(), dtype=np.int32, minimum=0, maximum=1, name=f"action_{i}"
-            )
-            for i in range(pe_const.MAX_SATS * pe_const.NUM_CHANNELS)
+        self._action_spec = array_spec.BoundedArraySpec(
+            shape=(pe_const.MAX_SATS * pe_const.NUM_CHANNELS,),
+            dtype=np.int32,
+            minimum=0,
+            maximum=1,
+            name=f"action",
         )
         self._observation_spec = array_spec.BoundedArraySpec(
             shape=(
