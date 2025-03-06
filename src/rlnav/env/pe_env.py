@@ -5,10 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
-from tf_agents.environments import py_environment
-from tf_agents.specs import array_spec
-from tf_agents.trajectories import time_step as ts
-
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
 from navutils.logger import Logger
@@ -18,6 +14,9 @@ from pewrapper.types.gps_time_wrapper import GPS_Time
 from rlnav.data.dataset import RLDataset
 from rlnav.env.wrapper import RLWrapper
 from rlnav.managers.reward_mgr import RewardManager
+from tf_agents.environments import py_environment
+from tf_agents.specs import array_spec
+from tf_agents.trajectories import time_step as ts
 
 ELEV_THRES = 30
 MIN_ELEV = 5
@@ -89,6 +88,9 @@ class PE_Env(py_environment.PyEnvironment):
             maximum=np.array([1.0] + max_values),
             name="observation",
         )
+        self._reward_spec = array_spec.BoundedArraySpec(
+            shape=(3,), dtype=np.float32, minimum=-10.0, maximum=10.0, name="reward"
+        )
 
         self.window_size = window_size
 
@@ -126,6 +128,9 @@ class PE_Env(py_environment.PyEnvironment):
 
     def observation_spec(self):
         return self._observation_spec
+
+    def reward_spec(self):
+        return self._reward_spec
 
     def _reset(self):
         start = time.time()
@@ -200,7 +205,7 @@ class PE_Env(py_environment.PyEnvironment):
 
         self._episode_ended = False
         self._times["reset_env"].append(time.time() - start)
-        return ts.restart(self._state)
+        return ts.restart(self._state, reward_spec=self._reward_spec)
 
     def _step(self, action):
         start = time.time()
@@ -250,11 +255,13 @@ class PE_Env(py_environment.PyEnvironment):
         self._times["step_env"].append(time.time() - start)
         if self._episode_ended:
             return ts.termination(
-                np.zeros(self._observation_spec.shape, dtype=np.float32), reward
+                np.zeros(self._observation_spec.shape, dtype=np.float32),
+                reward,
+                outer_dims=(),
             )
 
         else:
-            return ts.transition(self._state, reward)
+            return ts.transition(self._state, reward, outer_dims=())
 
     def _check_state(self):
         state = self._process_epochs()

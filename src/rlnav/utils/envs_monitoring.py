@@ -2,7 +2,6 @@ from typing import Any, Dict
 
 import numpy as np
 import pandas as pd
-
 from navutils.logger import Logger
 
 
@@ -155,7 +154,10 @@ def extract_agent_stats(parallel_envs, agent_stats):
                         np.array(v)[:min_len]
                         for v in values
                         if isinstance(v, (list, np.ndarray))
-                        and all(isinstance(x, (int, float)) for x in v)
+                        and all(
+                            isinstance(x, (int, float, np.floating))
+                            for x in np.array(v).flatten()
+                        )
                     ]
 
                     # Compute element-wise mean and standard deviation over truncated arrays
@@ -179,7 +181,7 @@ def extract_agent_stats(parallel_envs, agent_stats):
         elif metric_key == "AI_Errors" and "agent_errors" not in agent_stats:
             agent_stats["agent_errors"] = {}
 
-        if metric_key != "AI_Errors":
+        if metric_key != "AI_Errors" and (stats["mean"] and stats["std"]):
             agent_stats[metric_key]["mean"].extend(stats["mean"])
             agent_stats[metric_key]["std"].extend(stats["std"])
 
@@ -251,11 +253,13 @@ def merge_agent_errors(
 
                 if "max" in new_stat_dict and "max" in old_stat_dict:
                     merged_errors[epoch][error_key]["max"] = np.maximum(
-                        np.array(old_stat_dict.get("max", [])), np.array(new_stat_dict.get("max", []))
+                        np.array(old_stat_dict.get("max", [])),
+                        np.array(new_stat_dict.get("max", [])),
                     ).tolist()
                 if "min" in new_stat_dict and "min" in old_stat_dict:
                     merged_errors[epoch][error_key]["min"] = np.minimum(
-                        np.array(old_stat_dict.get("min", [])), np.array(new_stat_dict.get("min", []))
+                        np.array(old_stat_dict.get("min", [])),
+                        np.array(new_stat_dict.get("min", [])),
                     ).tolist()
         else:
             # If the epoch doesn't exist in merged_errors, add it directly.

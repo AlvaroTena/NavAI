@@ -4,7 +4,7 @@ from collections import Counter
 import rlnav.networks.ppo_networks as ppo_networks
 import tensorflow as tf
 from neptune import Run
-from rlnav.agent.masked_ppo_agent import PPOAgentMasked
+from rlnav.agent.multiobjective_masked_ppo_agent import MultiObjectiveMaskedPPOAgent
 from tf_agents.environments import TFPyEnvironment
 from tf_agents.networks import layer_utils
 
@@ -27,7 +27,7 @@ def create_ppo_agent(
         actor_net = ppo_networks.create_actor_net(observation_spec, action_spec)
         value_net = ppo_networks.create_value_net(observation_spec)
 
-    agent = PPOAgentMasked(
+    agent = MultiObjectiveMaskedPPOAgent(
         time_step_spec=time_step_spec,
         action_spec=action_spec,
         optimizer=optimizer,
@@ -35,10 +35,11 @@ def create_ppo_agent(
         value_net=value_net,
         num_epochs=10,
         train_step_counter=train_step_counter,
-        entropy_regularization=0.1,
+        # entropy_regularization=0.1,
         normalize_rewards=True,
         use_gae=True,
-        debug_summaries=True,
+        use_td_lambda_return=True,
+        # debug_summaries=True,
         # summarize_grads_and_vars=True,
     )
 

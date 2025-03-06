@@ -301,4 +301,4 @@ class RunningDiffMetric(RunningMetric):
         Returns:
             The cumulative value.
         """
-        return self.cumReward
+        return self.cumReward.copy()

@@ -13,15 +13,10 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from absl import logging as absl_logging
-from neptune_tensorboard import enable_tensorboard_logging
-from tf_agents.agents import tf_agent
-from tf_agents.environments import tf_py_environment
-from tf_agents.replay_buffers import tf_uniform_replay_buffer
-from tf_agents.utils import common
-
 from navutils.config import load_config
 from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
+from neptune_tensorboard import enable_tensorboard_logging
 from pewrapper.misc.version_wrapper_bin import RELEASE_INFO
 from rlnav.agent.ppo_agent import create_ppo_agent
 from rlnav.data.experience import pad_batch
@@ -40,6 +35,10 @@ from rlnav.reports.rewards_visualizations import generate_rewards_plot
 from rlnav.reports.times_visualization import generate_times_plot
 from rlnav.types.running_metric import RunningMetric
 from rlnav.utils.envs_monitoring import extract_agent_stats, extract_computation_times
+from tf_agents.agents import tf_agent
+from tf_agents.environments import tf_py_environment
+from tf_agents.replay_buffers import tf_uniform_replay_buffer
+from tf_agents.utils import common
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -226,6 +225,8 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
 
         try:
             while wrapperMgr.next_scenario(parsing_rate):
+                tf.keras.backend.clear_session()
+
                 scenario = wrapperMgr.scenario
                 generation = wrapperMgr.scenario_generation[scenario]
 
@@ -249,7 +250,14 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                         remove_empty_lists(wrapperMgr.get_times())
                     )
 
-                agent_stats.update({"agent_errors": {}})
+                agent_stats.update(
+                    {
+                        "agent_errors": {},
+                        "instant_rewards": {"mean": [], "std": []},
+                        "running_rewards": {"mean": [], "std": []},
+                        "cumulative_rewards": {"mean": [], "std": []},
+                    }
+                )
 
                 envs_times, agent_stats = train_agent(
                     train_env,
@@ -268,11 +276,11 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
 
                 train_env.close()
 
-            policy_saver.save(agent.train_step_counter.numpy())
-            for policy_file in os.listdir(policy_dir):
-                npt_run[f"training/agent/policy/{policy_file}"].upload(
-                    os.path.join(policy_dir, policy_file)
-                )
+                policy_saver.save(agent.train_step_counter.numpy())
+                for policy_file in os.listdir(policy_dir):
+                    npt_run[f"training/agent/policy/{policy_file}"].upload(
+                        os.path.join(policy_dir, policy_file)
+                    )
 
             wrapperMgr.close_PE()
 
@@ -358,7 +366,8 @@ def train_agent(
     train_env._batch_size = train_env.pyenv.batch_size
     train_env._time_step = train_env.pyenv.current_time_step()
 
-    envs_times = extract_computation_times(new_active_envs, envs_times)
+    if log_times:
+        envs_times = extract_computation_times(new_active_envs, envs_times)
 
     envs_errors = {}
 
@@ -605,7 +614,8 @@ def train_agent(
                 train_env._batch_size = train_env.pyenv.batch_size
                 train_env._time_step = train_env.pyenv.current_time_step()
 
-                envs_times = extract_computation_times(new_active_envs, envs_times)
+                if log_times:
+                    envs_times = extract_computation_times(new_active_envs, envs_times)
 
         except WrapperDataAttributeError:
             pass

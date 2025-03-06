@@ -305,7 +305,7 @@ class RewardManager:
             )
             reward = np.zeros(3)
 
-        reward = np.clip(reward, -10.0, 10.0)
+        reward = np.clip(reward, -10.0, 10.0, dtype=np.float32)
         self.reward.update(reward)
 
         instant_reward = self.reward.get_differentiated_value()
@@ -741,13 +741,13 @@ class RewardManager:
         # Get the current RMSE
         current_ai_rmse = self.ai_errors_values.get_differentiated_value()
 
-        if self.ai_errors_values.get_cumulative_value() > max_pe_threshold:
+        if any(self.ai_errors_values.get_cumulative_value() > max_pe_threshold):
             self.rmse_patience += 1
 
         # Determine if reconvergence is needed based on RMSE or reward
         reconvergence_needed = (
-            current_ai_rmse > max_ai_threshold
-            or current_ai_rmse > max_pe_threshold
+            any(current_ai_rmse > max_ai_threshold)
+            or any(current_ai_rmse > max_pe_threshold)
             or self.rmse_patience > 10
         )
 
