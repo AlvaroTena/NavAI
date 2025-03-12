@@ -38,39 +38,20 @@ RUN apt update \
     python3 \
     python3-pip \
     python3-dev \
+    pipx \
     gdb \
     ssh \
     htop \
     nvtop
 
-RUN pip install tensorflow==2.15.0
-RUN pip install "apache-airflow[celery]==2.9.0" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.9.0/constraints-3.10.txt"
+RUN pipx ensurepath
+RUN pipx install poetry
 
-RUN pip3 install -U pip
-RUN pip3 install pygit2 \
-    dvc \
-    dvc-ssh \
-    dvc-s3 \
-    build \
-    sortedcontainers \
-    nbformat \
-    toml \
-    pandas \
-    python-box \
-    scikit-learn \
-    pytest \
-    tables \
-    pyarrow \
-    tf-agents \
-    neptune \
-    neptune-tensorboard \
-    folium \
-    pyproj \
-    plotly \
-    geopy \
-    genv
+WORKDIR /rl_nav
+COPY pyproject.toml poetry.lock* ./
 
-ENV PIP_ROOT_USER_ACTION=ignore
+RUN poetry install --no-interaction --no-ansi
+RUN poetry install --extras rl --no-interaction --no-ansi
 
 ARG USERNAME
 ARG USER_UID
