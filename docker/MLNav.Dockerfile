@@ -1,4 +1,17 @@
-FROM nav_img:latest
+FROM ubuntu:22.04 as boost-builder
+
+RUN apt-get update \
+    && apt-get install -y \
+    libboost-dev \
+    libboost-regex1.74.0 \
+    libboost-system1.74.0 \
+    libboost-filesystem1.74.0 \
+    libboost-thread1.74.0 \
+    libboost-program-options1.74.0 \
+    libboost-chrono1.74.0 \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
 
 RUN apt-get update \
    && DEBIAN_FRONTEND="noninteractive" \
@@ -28,38 +41,26 @@ RUN apt update \
     && apt install -y --no-install-recommends \
     python3\
     python3-pip\
+    python3-dev\
+    pipx\
     gdb \
     ssh \
     htop
 
-RUN pip3 install -U pip
-RUN pip install "apache-airflow[celery]==2.9.0" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.9.0/constraints-3.10.txt"
+RUN pipx ensurepath
+RUN pipx install poetry
 
-RUN pip3 install pygit2 \
-    dvc \
-    dvc-ssh \
-    build \
-    sortedcontainers \
-    pandas \
-    python-box \
-    scikit-learn \
-    pytest \
-    yellowbrick \
-    umap-learn \
-    hyperopt \
-    h5py \
-    toml \
-    neptune \
-    seaborn \
-    ydata_profiling
+WORKDIR /ml_nav
+COPY pyproject.toml poetry.lock* ./
 
-RUN python3 -m pip install tables
+RUN poetry install --no-interaction --no-ansi
+RUN poetry install --extras ml --no-interaction --no-ansi
 
 ENV PIP_ROOT_USER_ACTION=ignore
 
-ARG USERNAME=magicgnss
-ARG USER_UID=1000
-ARG USER_GID=$USER_UID
+ARG USERNAME
+ARG USER_UID
+ARG USER_GID
 
 # Create the user
 RUN groupadd --gid $USER_GID $USERNAME \
@@ -74,7 +75,8 @@ RUN groupadd --gid $USER_GID $USERNAME \
 # ********************************************************
 # * Anything else you want to do like clean up goes here *
 # ********************************************************
-
+# Set the working directory for the new user
+WORKDIR /home/$USERNAME
 # [Optional] Set the default user. Omit if you want to keep the default as root.
 USER $USERNAME
 
