@@ -47,6 +47,35 @@ def get_transformers_min_max(transformers_path: str):
     )
 
 
+def create_observation_spec(min_values, max_values):
+    return array_spec.BoundedArraySpec(
+        shape=(
+            pe_const.MAX_SATS * pe_const.NUM_CHANNELS,
+            1 + len(const.PROCESSED_FEATURE_LIST),
+        ),
+        dtype=np.float32,
+        minimum=np.array([0.0] + min_values),
+        maximum=np.array([1.0] + max_values),
+        name="observation",
+    )
+
+
+def create_action_spec():
+    return array_spec.BoundedArraySpec(
+        shape=(pe_const.MAX_SATS * pe_const.NUM_CHANNELS,),
+        dtype=np.int32,
+        minimum=0,
+        maximum=1,
+        name=f"action",
+    )
+
+
+def create_reward_spec():
+    return array_spec.BoundedArraySpec(
+        shape=(3,), dtype=np.float32, minimum=-10.0, maximum=10.0, name="reward"
+    )
+
+
 class PE_Env(py_environment.PyEnvironment):
     def __init__(
         self,
@@ -57,47 +86,33 @@ class PE_Env(py_environment.PyEnvironment):
         max_values: list,
         transformers_path: str,
         output_path: str,
+        name: str,
         window_size=1,
         scenario: str = None,
-        generation: int = None,
+        num_generations: int = None,
     ):
         self.configMgr = configMgr
         self.wrapper_data = wrapper_data
         self.rewardMgr = rewardMgr
 
         self.scenario = scenario
-        self.gen = generation
+        self.gen = 0
+        self.num_generations = num_generations
         self.transformers_path = transformers_path
         self.output_path = output_path
+        self.name = name
 
         self.wrapper = None
 
-        self._action_spec = array_spec.BoundedArraySpec(
-            shape=(pe_const.MAX_SATS * pe_const.NUM_CHANNELS,),
-            dtype=np.int32,
-            minimum=0,
-            maximum=1,
-            name=f"action",
-        )
-        self._observation_spec = array_spec.BoundedArraySpec(
-            shape=(
-                pe_const.MAX_SATS * pe_const.NUM_CHANNELS,
-                1 + len(const.PROCESSED_FEATURE_LIST),
-            ),
-            dtype=np.float32,
-            minimum=np.array([0.0] + min_values),
-            maximum=np.array([1.0] + max_values),
-            name="observation",
-        )
-        self._reward_spec = array_spec.BoundedArraySpec(
-            shape=(3,), dtype=np.float32, minimum=-10.0, maximum=10.0, name="reward"
-        )
+        self._observation_spec = create_observation_spec(min_values, max_values)
+        self._action_spec = create_action_spec()
+        self._reward_spec = create_reward_spec()
 
         self.window_size = window_size
 
         self._state = np.zeros(self._observation_spec.shape, dtype=np.float32)
         self._episode_ended = False
-        self.completed_dataset_once = False
+        self.num_completed_dataset = 0
 
         self.reset_times()
 
@@ -134,9 +149,21 @@ class PE_Env(py_environment.PyEnvironment):
         return self._reward_spec
 
     def _reset(self):
+        if self.gen >= self.num_generations:
+            return ts.termination(
+                np.zeros(self._observation_spec.shape, dtype=np.float32),
+                np.zeros(self._reward_spec.shape, dtype=np.float32),
+                outer_dims=(),
+            )
+
         start = time.time()
 
-        os.makedirs(self.output_path, exist_ok=True)
+        self.gen += 1
+
+        output_path = os.path.join(
+            self.output_path, f"AI_generation_{self.gen}", self.name
+        )
+        os.makedirs(output_path, exist_ok=True)
 
         self.wrapper = RLWrapper(
             self.configMgr,
@@ -176,13 +203,14 @@ class PE_Env(py_environment.PyEnvironment):
             generation=self.gen,
         )
         self._init_log()
-        self.rewardMgr.set_output_path(self.output_path, self.scenario, self.gen)
+        self.rewardMgr.next_generation()
+        self.rewardMgr.set_output_path(output_path)
         self.rewardMgr.reward_rec.initialize(
             self.wrapper.wrapper_file_data_.initial_epoch
         )
 
         if not self.wrapper._start_processing(
-            self.output_path,
+            output_path,
             self.commit_id,
             self.common_lib_commit_id,
         ):
@@ -233,17 +261,11 @@ class PE_Env(py_environment.PyEnvironment):
         _, ai_output = result
 
         reward = self.rewardMgr.compute_reward(ai_output)
-
-        epoch = GPS_Time(
-            w=ai_output.output_PE.timestamp_week, s=ai_output.output_PE.timestamp_second
-        )
-        self.rewardMgr.reward_rec.record(epoch, reward)
-
         state = self._check_state()
         if isinstance(state, bool):
             if state:
                 self._episode_ended = True
-                self.completed_dataset_once = True
+                self.num_completed_dataset += 1
 
             else:
                 Logger.log_message(
@@ -382,5 +404,8 @@ class PE_Env(py_environment.PyEnvironment):
     def get_reward_filepath(self):
         return self.rewardMgr.get_reward_filepath()
 
+    def get_generation(self):
+        return self.gen
+
     def is_done(self):
-        return self.completed_dataset_once
+        return self.num_completed_dataset >= self.num_generations

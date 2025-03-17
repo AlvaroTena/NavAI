@@ -1,24 +1,22 @@
 import io
 from collections import Counter
+from typing import Tuple
 
 import rlnav.networks.ppo_networks as ppo_networks
 import tensorflow as tf
 from neptune import Run
 from rlnav.agent.multiobjective_masked_ppo_agent import MultiObjectiveMaskedPPOAgent
-from tf_agents.environments import TFPyEnvironment
 from tf_agents.networks import layer_utils
+from tf_agents.trajectories import time_step as ts
 
 
-def create_ppo_agent(
-    train_env: TFPyEnvironment, npt_run: Run, rnn=True, learning_rate=1e-3
-):
+def create_ppo_agent(env_specs: Tuple, npt_run: Run, rnn=True, learning_rate=1e-3):
     optimizer = tf.keras.optimizers.AdamW(learning_rate=learning_rate)
 
     train_step_counter = tf.Variable(0, dtype=tf.int64)
 
-    observation_spec = train_env.observation_spec()
-    action_spec = train_env.action_spec()
-    time_step_spec = train_env.time_step_spec()
+    observation_spec, action_spec, reward_spec = env_specs
+    time_step_spec = ts.time_step_spec(observation_spec, reward_spec)
 
     if rnn:
         actor_net = ppo_networks.create_actor_rnn_net(observation_spec, action_spec)

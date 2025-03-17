@@ -47,8 +47,6 @@ class RewardManager:
         self.ai_positions = pd.DataFrame(columns=["LAT_PROP", "LON_PROP"])
         self.map = None
 
-        self.scenario = ""
-        self.generation = 1
         self.output_path = ""
         self.map_file = ""
         self.reset_times()
@@ -88,20 +86,13 @@ class RewardManager:
         self.reset_times()
         return times
 
-    def set_output_path(
-        self,
-        output_path,
-        scenario,
-        generation,
-    ):
+    def set_output_path(self, output_path):
         os.makedirs(
             output_path,
             exist_ok=True,
         )
         self.output_path = output_path
         self.map_file = os.path.join(output_path, "map.html")
-        self.scenario = scenario
-        self.generation = generation
 
         self.reward_rec.reset(output_path)
 
@@ -205,6 +196,9 @@ class RewardManager:
 
     def compute_reward(self, ai_output: OutputStr):
         start = time.time()
+        epoch = GPS_Time(
+            w=ai_output.output_PE.timestamp_week, s=ai_output.output_PE.timestamp_second
+        )
 
         try:
             ai_record = self._get_record_output(ai_output)
@@ -317,6 +311,8 @@ class RewardManager:
         self.log_data["instant_rewards"].append(instant_reward)
         self.log_data["running_rewards"].append(running_reward)
         self.log_data["cumulative_rewards"].append(cumulative_reward)
+
+        self.reward_rec.record(epoch, instant_reward, cumulative_reward)
 
         return instant_reward
 

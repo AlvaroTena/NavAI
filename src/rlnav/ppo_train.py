@@ -1,7 +1,7 @@
 import argparse
+import gc
 import logging
 import os
-import shutil
 import signal
 import sys
 import time
@@ -11,6 +11,7 @@ from typing import Any
 import neptune
 import numpy as np
 import pandas as pd
+import rlnav.utils.neptune_handler as npt_handler
 import tensorflow as tf
 from absl import logging as absl_logging
 from navutils.config import load_config
@@ -22,22 +23,23 @@ from rlnav.agent.ppo_agent import create_ppo_agent
 from rlnav.data.experience import pad_batch
 from rlnav.drivers.dynamic_step_driver_opt import DynamicStepDriverOpt
 from rlnav.env.cascade_parallel_py_environment import CascadeParallelPyEnvironment
-from rlnav.env.pe_env import PE_Env, get_transformers_min_max
+from rlnav.env.pe_env import (
+    PE_Env,
+    create_action_spec,
+    create_observation_spec,
+    create_reward_spec,
+    get_transformers_min_max,
+)
 from rlnav.env.wrapper import WrapperDataAttributeError
 from rlnav.managers.reward_mgr import RewardManager
 from rlnav.managers.wrapper_mgr import WrapperManager
 from rlnav.recorder.training_recorder import TrainingRecorder
-from rlnav.reports.error_visualizations import (
-    generate_HV_errors_plot,
-    generate_NEU_errors_plot,
-)
-from rlnav.reports.rewards_visualizations import generate_rewards_plot
-from rlnav.reports.times_visualization import generate_times_plot
 from rlnav.types.running_metric import RunningMetric
 from rlnav.utils.envs_monitoring import extract_agent_stats, extract_computation_times
 from tf_agents.agents import tf_agent
 from tf_agents.environments import tf_py_environment
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
+from tf_agents.specs import tensor_spec
 from tf_agents.utils import common
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -76,10 +78,10 @@ class EnvCreator:
         wrapper_data,
         rewardMgr,
         scenario,
-        generation,
         min_values,
         max_values,
         output_path,
+        name,
         shared_queue,
     ):
         self.config = config
@@ -87,10 +89,10 @@ class EnvCreator:
         self.wrapper_data = wrapper_data
         self.rewardMgr = rewardMgr
         self.scenario = scenario
-        self.generation = generation
         self.min_values = min_values
         self.max_values = max_values
         self.output_path = output_path
+        self.name = name
         self.shared_queue = shared_queue
 
     def __call__(self):
@@ -104,7 +106,7 @@ class EnvCreator:
             wrapper_data=self.wrapper_data,
             rewardMgr=self.rewardMgr,
             scenario=self.scenario,
-            generation=self.generation,
+            num_generations=self.config.scenarios.n_generations,
             min_values=self.min_values,
             max_values=self.max_values,
             transformers_path=self.config.transformed_data.path,
@@ -114,6 +116,7 @@ class EnvCreator:
                 else 1
             ),
             output_path=self.output_path,
+            name=self.name,
         )
 
 
@@ -136,7 +139,7 @@ def create_parallel_environment(
 
     Args:
         config (Any): Overall configuration settings.
-        wrapperMgr (WrapperManager): Manager object for wrappers and scenario generation.
+        wrapperMgr (WrapperManager): Manager object for wrappers.
         rewardMgr (RewardManager): Manager object for reward handling.
         min_values (list): Minimum boundary values for the environment.
         max_values (list): Maximum boundary values for the environment.
@@ -157,10 +160,10 @@ def create_parallel_environment(
                 wrapper_data=wrapperMgr.wrapper_data,
                 rewardMgr=rewardMgr,
                 scenario=wrapperMgr.scenario,
-                generation=wrapperMgr.scenario_generation[wrapperMgr.scenario],
                 min_values=min_values,
                 max_values=max_values,
-                output_path=os.path.join(output_path, f"env_{i}"),
+                output_path=output_path,
+                name=f"env_{i}",
                 shared_queue=Logger.get_queue(),
             )
             for i in range(num_parallel_environments)
@@ -185,6 +188,10 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
     enable_tensorboard_logging(npt_run)
     config = load_config(config_path)
 
+    min_values, max_values = get_transformers_min_max(
+        os.path.join(config.transformed_data.path, "transforms")
+    )
+
     baseRewardMgr = RewardManager()
     wrapperMgr = WrapperManager(
         config.scenarios.path,
@@ -194,29 +201,20 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
         output_path,
         baseRewardMgr,
         npt_run,
-        num_generations=config.scenarios.n_generations,
     )
 
-    min_values, max_values = get_transformers_min_max(
-        os.path.join(config.transformed_data.path, "transforms")
-    )
-
-    env = PE_Env(
-        configMgr=wrapperMgr.configMgr,
-        wrapper_data=wrapperMgr.wrapper_data,
-        rewardMgr=baseRewardMgr,
-        generation=wrapperMgr.scenario_generation[wrapperMgr.scenario],
-        min_values=min_values,
-        max_values=max_values,
-        transformers_path=config.transformed_data.path,
-        window_size=(
-            config.training.rnn.window_size if config.training.rnn.enable else 1
-        ),
-        output_path=output_path,
-    )
     agent = create_ppo_agent(
-        tf_py_environment.TFPyEnvironment(env), npt_run, rnn=config.training.rnn.enable
+        (
+            tensor_spec.from_spec(create_observation_spec(min_values, max_values)),
+            tensor_spec.from_spec(create_action_spec()),
+            tensor_spec.from_spec(create_reward_spec()),
+        ),
+        npt_run,
+        rnn=config.training.rnn.enable,
     )
+
+    policy_dir = os.path.join(output_path, "policy")
+    policy_saver = common.Checkpointer(ckpt_dir=policy_dir, policy=agent.collect_policy)
 
     with TrainingRecorder(
         output_path=os.path.join(output_path, "Training_Tracing")
@@ -226,9 +224,9 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
         try:
             while wrapperMgr.next_scenario(parsing_rate):
                 tf.keras.backend.clear_session()
+                gc.collect()
 
                 scenario = wrapperMgr.scenario
-                generation = wrapperMgr.scenario_generation[scenario]
 
                 train_env = create_parallel_environment(
                     config,
@@ -238,11 +236,6 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                     max_values,
                     baseRewardMgr.output_path,
                     config.training.num_parallel_environments,
-                )
-
-                policy_dir = os.path.join(output_path, "policy")
-                policy_saver = common.Checkpointer(
-                    ckpt_dir=policy_dir, policy=agent.collect_policy
                 )
 
                 if config.neptune.monitoring_times:
@@ -264,7 +257,6 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                     agent,
                     baseRewardMgr,
                     scenario,
-                    generation,
                     config.training.active_environments_per_iteration,
                     npt_run,
                     config.neptune.monitoring_times,
@@ -281,6 +273,9 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                     npt_run[f"training/agent/policy/{policy_file}"].upload(
                         os.path.join(policy_dir, policy_file)
                     )
+
+                del train_env
+                gc.collect()
 
             wrapperMgr.close_PE()
 
@@ -303,7 +298,6 @@ def train_agent(
     agent: tf_agent.TFAgent,
     reward_manager: RewardManager,
     scenario: str,
-    generation: int,
     active_environments_per_iteration: int,
     npt_run: neptune.Run,
     log_times: bool,
@@ -379,9 +373,34 @@ def train_agent(
         )
         return envs_times, agent_stats
 
+    envs_generation = [None] * total_envs
+
     while not all([sub_env.call("is_done")() for sub_env in train_env.active_envs]):
         driver._num_steps = max_steps_per_env * train_env.batch_size
         enable_checkpoint = len(train_env.active_envs) == total_envs
+
+        # Collect generation information from active sub-environments
+        sub_envs_generations = [
+            sub_env.call("get_generation")() for sub_env in train_env.active_envs
+        ]
+
+        # Pad with None values if needed to match envs_generation length
+        if len(sub_envs_generations) < len(envs_generation):
+            sub_envs_generations.extend(
+                [None] * (len(envs_generation) - len(sub_envs_generations))
+            )
+
+        # Update reward manager's output path if the first generation has changed
+        if sub_envs_generations[0] != envs_generation[0]:
+            new_path = os.path.join(
+                reward_manager.output_path,
+                f"AI_generation{sub_envs_generations[0]}",
+            )
+            reward_manager.set_output_path(new_path)
+
+        # Update envs_generation if the generations have changed
+        if sub_envs_generations != envs_generation:
+            envs_generation = sub_envs_generations
 
         try:
             times = {}
@@ -396,7 +415,7 @@ def train_agent(
                 num_steps=max_steps_per_env,
                 sample_batch_size=total_envs,
             )
-            experience, info = next(iter(dataset))
+            experience, _ = next(iter(dataset))
             active_count = train_env.batch_size
             experience_filtered = tf.nest.map_structure(
                 lambda t: t[:active_count], experience
@@ -404,147 +423,57 @@ def train_agent(
             train_loss = agent.train(experience_filtered)
             times.update({"agent_train": [time.time() - start]})
 
+            del experience
+            del experience_filtered
+
             if log_times:
                 npt_run["monitoring/times"].extend(remove_empty_lists(times))
 
                 envs_times = extract_computation_times(
                     train_env.active_envs, envs_times
                 )
-                for time_key in envs_times:
-                    fig_time = generate_times_plot(envs_times, time_key)
-                    if npt_run._mode == "debug":
-                        os.makedirs(
-                            os.path.join(output_path, "Training_Tracing/times/"),
-                            exist_ok=True,
-                        )
-                        fig_time.write_html(
-                            os.path.join(
-                                output_path,
-                                "Training_Tracing/times/",
-                                f"times_{time_key}.html",
-                            )
-                        )
-
-                    else:
-                        npt_run[f"monitoring/times/{time_key}"].upload(
-                            fig_time, include_plotlyjs="cdn"
-                        )
+                npt_handler.log_computation_times(envs_times, output_path, npt_run)
 
             agent_stats, raw_envs_errors = extract_agent_stats(
                 train_env.active_envs, agent_stats
             )
+            next_gen_errors = {}
+
             for env, errors in raw_envs_errors.items():
                 errors.set_index("Epoch", inplace=True)
 
                 if env not in envs_errors:
-                    envs_errors[env] = errors
+                    envs_errors[env] = errors.copy(deep=False)
                 else:
                     duplicated_epochs = errors.index.intersection(
                         envs_errors[env].index
                     )
                     if not duplicated_epochs.empty:
-                        envs_errors[env].drop(duplicated_epochs, inplace=True)
+                        next_gen_errors[env] = errors.loc[duplicated_epochs].copy(
+                            deep=False
+                        )
+                        errors = errors.drop(duplicated_epochs)
 
-                    envs_errors[env] = pd.concat(
-                        [envs_errors[env], errors]
-                    ).sort_index()
+                    if not errors.empty:
+                        envs_errors[env] = pd.concat(
+                            [envs_errors[env], errors]
+                        ).sort_index()
 
-            # Plotting agent rewards
-            fig_rewards = generate_rewards_plot(
-                {k: v for k, v in agent_stats.items() if k != "agent_errors"}
-            )
-            if npt_run._mode == "debug":
-                fig_rewards.write_html(
-                    os.path.join(reward_manager.output_path, "rewards.html")
-                )
+                del errors
 
-            else:
-                npt_run["training/train/rewards"].upload(
-                    fig_rewards, include_plotlyjs="cdn"
-                )
-                npt_run[
-                    f"training/{scenario}/AI_generation{generation}/rewards"
-                ].upload(fig_rewards, include_plotlyjs="cdn")
-
-            # Plotting agent vs baseline errors
             baseline_errors = reward_manager.limit_baseline_log(
                 reward_manager.initial_epoch, reward_manager.final_epoch
             )
-            agent_errors = agent_stats["agent_errors"]
-
-            ## H-V plot
-            for env, errors in envs_errors.items():
-                fig_HV = generate_HV_errors_plot(
-                    baseline_errors=baseline_errors,
-                    agent_errors=errors.to_dict("index"),
-                    combined=False,
-                )
-
-                if npt_run._mode == "debug":
-                    fig_HV.write_html(
-                        os.path.join(
-                            reward_manager.output_path, f"{env}", "HV_errors.html"
-                        )
-                    )
-                else:
-                    npt_run[f"training/train/{env}/HV"].upload(
-                        fig_HV, include_plotlyjs="cdn"
-                    )
-                    npt_run[
-                        f"training/{scenario}/AI_generation{generation}/{env}/HV"
-                    ].upload(fig_HV, include_plotlyjs="cdn")
-
-            fig_HV = generate_HV_errors_plot(
-                baseline_errors=baseline_errors,
-                agent_errors=agent_errors,
+            npt_handler.log_stats(
+                agent_stats,
+                envs_errors,
+                next_gen_errors,
+                baseline_errors,
+                reward_manager.output_path,
+                scenario,
+                envs_generation,
+                npt_run,
             )
-
-            if npt_run._mode == "debug":
-                fig_HV.write_html(
-                    os.path.join(reward_manager.output_path, "HV_errors.html")
-                )
-
-            else:
-                npt_run[f"training/train/HV"].upload(fig_HV, include_plotlyjs="cdn")
-                npt_run[f"training/{scenario}/AI_generation{generation}/HV"].upload(
-                    fig_HV, include_plotlyjs="cdn"
-                )
-
-            ## NEU plot
-            for env, errors in envs_errors.items():
-                fig_NEU = generate_NEU_errors_plot(
-                    baseline_errors=baseline_errors,
-                    agent_errors=errors.to_dict("index"),
-                    combined=False,
-                )
-
-                if npt_run._mode == "debug":
-                    fig_NEU.write_html(
-                        os.path.join(
-                            reward_manager.output_path, f"{env}", "NEU_errors.html"
-                        )
-                    )
-
-                else:
-                    npt_run[
-                        f"training/{scenario}/AI_generation{generation}/{env}/NEU"
-                    ].upload(fig_NEU, include_plotlyjs="cdn")
-
-            fig_NEU = generate_NEU_errors_plot(
-                baseline_errors=baseline_errors,
-                agent_errors=agent_errors,
-            )
-
-            if npt_run._mode == "debug":
-                fig_NEU.write_html(
-                    os.path.join(reward_manager.output_path, "NEU_errors.html")
-                )
-
-            else:
-                npt_run[f"training/train/NEU"].upload(fig_NEU, include_plotlyjs="cdn")
-                npt_run[f"training/{scenario}/AI_generation{generation}/NEU"].upload(
-                    fig_NEU, include_plotlyjs="cdn"
-                )
 
             loss.update(train_loss.loss.numpy())
             policy_gradient_loss.update(train_loss.extra.policy_gradient_loss.numpy())
@@ -589,6 +518,7 @@ def train_agent(
 
                 map_file = reward_manager.update_map(reset=True)
                 npt_run[f"training/train/map"].upload(map_file)
+                del envs_positions
 
             # Guardar un checkpoint.
             if enable_checkpoint:
@@ -620,14 +550,17 @@ def train_agent(
         except WrapperDataAttributeError:
             pass
 
+        finally:
+            gc.collect()
+
     for i, sub_env in enumerate(train_env.active_envs):
         map_file = sub_env.call("update_map")()
-        npt_run[f"training/{scenario}/AI_generation{generation}/env_{i}/map"].upload(
-            map_file
-        )
-        npt_run[f"training/{scenario}/AI_generation{generation}/env_{i}/reward"].upload(
-            sub_env.call("get_reward_filepath")()
-        )
+        npt_run[
+            f"training/{scenario}/AI_generation{envs_generation[i]}/env_{i}/map"
+        ].upload(map_file)
+        npt_run[
+            f"training/{scenario}/AI_generation{envs_generation[i]}/env_{i}/reward"
+        ].upload(sub_env.call("get_reward_filepath")())
 
     train_checkpointer.save(agent.train_step_counter.numpy())
     for checkpoint_file in os.listdir(checkpoint_dir):
