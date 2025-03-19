@@ -66,7 +66,7 @@ class WrapperManager:
                 else:
                     Logger.log_message(
                         Logger.Category.WARNING,
-                        Logger.Module.NONE,
+                        Logger.Module.CONFIG,
                         f"Priority scenario '{priority_scen}' not found. Maintaining normal order.",
                     )
 
@@ -282,7 +282,7 @@ class WrapperManager:
 
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.READER,
                 log_msg,
             )
 
@@ -299,7 +299,7 @@ class WrapperManager:
 
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.READER,
                 log_msg,
             )
 

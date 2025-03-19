@@ -294,7 +294,7 @@ class RewardManager:
         except Exception as e:
             Logger.log_message(
                 Logger.Category.WARNING,
-                Logger.Module.NONE,
+                Logger.Module.REWARD,
                 f"Error in compute_reward: {e}",
             )
             reward = np.zeros(3)
@@ -476,8 +476,8 @@ class RewardManager:
 
     def _get_error_position_ref_span(self, df_data_ref):
         Logger.log_message(
-            Logger.Category.INFO,
-            Logger.Module.NONE,
+            Logger.Category.DEBUG,
+            Logger.Module.REWARD,
             "Calculating NEU Position Error between RTPPP and SPAN",
         )
 
@@ -498,7 +498,7 @@ class RewardManager:
         ):
             Logger.log_message(
                 Logger.Category.WARNING,
-                Logger.Module.NONE,
+                Logger.Module.REWARD,
                 "The RTPPP has not LAT, LON or HEI. Computing LAT, LON and HEI from XYZ",
             )
             (
@@ -525,8 +525,8 @@ class RewardManager:
 
         if epoch_not_equal_to_raw_epoch.any():
             Logger.log_message(
-                Logger.Category.INFO,
-                Logger.Module.NONE,
+                Logger.Category.DEBUG,
+                Logger.Module.REWARD,
                 "The epochs between RTPPP and SPAN are not the same, so it is necessary to propagate the pos error epochs",
             )
             df_data_ref_aux.loc[epoch_not_equal_to_raw_epoch] = (

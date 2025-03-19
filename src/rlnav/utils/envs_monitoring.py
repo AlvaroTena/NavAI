@@ -41,7 +41,7 @@ def extract_computation_times(parallel_envs, envs_times):
             if not values:
                 Logger.log_message(
                     Logger.Category.WARNING,
-                    Logger.Module.NONE,
+                    Logger.Module.MONITOR,
                     f"No values collected for key '{time_key}'",
                 )
                 mean_std[time_key]["mean"] = []
@@ -63,7 +63,7 @@ def extract_computation_times(parallel_envs, envs_times):
         except Exception as e:
             Logger.log_message(
                 Logger.Category.WARNING,
-                Logger.Module.NONE,
+                Logger.Module.MONITOR,
                 f"Error processing computation times for key '{time_key}': {e}",
             )
             mean_std[time_key]["mean"] = []
@@ -142,7 +142,7 @@ def extract_agent_stats(parallel_envs, agent_stats):
                 if not values:
                     Logger.log_message(
                         Logger.Category.WARNING,
-                        Logger.Module.NONE,
+                        Logger.Module.MONITOR,
                         f"No values collected for key '{log_key}'",
                     )
                     mean_std[log_key]["mean"] = []
@@ -169,7 +169,7 @@ def extract_agent_stats(parallel_envs, agent_stats):
             except Exception as e:
                 Logger.log_message(
                     Logger.Category.WARNING,
-                    Logger.Module.NONE,
+                    Logger.Module.MONITOR,
                     f"Error processing stats for key '{log_key}': {e}",
                 )
                 mean_std[log_key]["mean"] = []

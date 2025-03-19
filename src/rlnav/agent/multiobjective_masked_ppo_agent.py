@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 
 import rlnav.utils.vectorized_value_ops as vectorized_value_ops
 import tensorflow as tf
+import tensorflow_probability as tfp
 from rlnav.agent.masked_ppo_agent import PPOAgentMasked
 from rlnav.utils import multiobjective_ppo_utils as moe_ppo_utils
 from tf_agents.agents.ppo import ppo_agent, ppo_utils
@@ -321,10 +322,17 @@ class MultiObjectiveMaskedPPOAgent(PPOAgentMasked):
             ),
         )
 
+        independent_old_actions_distribution = tfp.distributions.Independent(
+            old_actions_distribution,
+            reinterpreted_batch_ndims=len(self.action_spec.shape),
+        )
+
         # Compute log probability of actions taken during data collection, using the
         #   collect policy distribution.
         old_act_log_probs = common.log_probability(
-            old_actions_distribution, processed_experience.action, self._action_spec
+            independent_old_actions_distribution,
+            processed_experience.action,
+            self._action_spec,
         )
 
         if self._debug_summaries and not tf.config.list_logical_devices("TPU"):
@@ -667,3 +675,33 @@ class MultiObjectiveMaskedPPOAgent(PPOAgentMasked):
             )
 
         return value_estimation_loss
+
+    def _kl_divergence(
+        self,
+        time_steps,
+        action_distribution_parameters,
+        current_policy_distribution,
+    ):
+        outer_dims = list(
+            range(nest_utils.get_outer_rank(time_steps, self.time_step_spec))
+        )
+
+        old_actions_distribution = ppo_utils.distribution_from_spec(
+            self._action_distribution_spec,
+            action_distribution_parameters,
+            legacy_distribution_network=isinstance(
+                self._actor_net, network.DistributionNetwork
+            ),
+        )
+
+        independent_old_actions_distribution = tfp.distributions.Independent(
+            old_actions_distribution,
+            reinterpreted_batch_ndims=len(self.action_spec.shape),
+        )
+
+        kl_divergence = ppo_utils.nested_kl_divergence(
+            independent_old_actions_distribution,
+            current_policy_distribution,
+            outer_dims=outer_dims,
+        )
+        return kl_divergence

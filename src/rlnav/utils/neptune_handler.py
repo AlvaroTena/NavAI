@@ -71,7 +71,7 @@ def log_rewards(
 
     else:
         npt_run["training/train/rewards"].upload(fig_rewards, include_plotlyjs="cdn")
-        npt_run[f"training/{scenario}/AI_generation{generation}/rewards"].upload(
+        npt_run[f"training/{scenario}/AI_gen{generation}/rewards"].upload(
             fig_rewards, include_plotlyjs="cdn"
         )
 
@@ -115,7 +115,7 @@ def log_hv_per_env(
                 (
                     new_path := os.path.join(
                         "/".join(output_path.split("/")[:-1]),
-                        f"AI_generation{gen}",
+                        f"AI_gen{gen}",
                         f"{env}",
                     )
                 ),
@@ -129,7 +129,7 @@ def log_hv_per_env(
             )
         else:
             npt_run[f"training/train/{env}/HV"].upload(fig_HV, include_plotlyjs="cdn")
-            npt_run[f"training/{scenario}/AI_generation{gen}/{env}/HV"].upload(
+            npt_run[f"training/{scenario}/AI_gen{gen}/{env}/HV"].upload(
                 fig_HV, include_plotlyjs="cdn"
             )
 
@@ -148,7 +148,7 @@ def log_hv_per_env(
                     (
                         new_path := os.path.join(
                             "/".join(output_path.split("/")[:-1]),
-                            f"AI_generation{gen+1}",
+                            f"AI_gen{gen+1}",
                             f"{env}",
                         )
                     ),
@@ -165,7 +165,7 @@ def log_hv_per_env(
                 npt_run[f"training/train/{env}/HV"].upload(
                     fig_HV, include_plotlyjs="cdn"
                 )
-                npt_run[f"training/{scenario}/AI_generation{gen+1}/{env}/HV"].upload(
+                npt_run[f"training/{scenario}/AI_gen{gen+1}/{env}/HV"].upload(
                     fig_HV, include_plotlyjs="cdn"
                 )
 
@@ -207,7 +207,7 @@ def log_hv_global(
 
     else:
         npt_run[f"training/train/HV"].upload(fig_HV, include_plotlyjs="cdn")
-        npt_run[f"training/{scenario}/AI_generation{generation}/HV"].upload(
+        npt_run[f"training/{scenario}/AI_gen{generation}/HV"].upload(
             fig_HV, include_plotlyjs="cdn"
         )
 
@@ -293,7 +293,7 @@ def log_neu_per_env(
                 (
                     new_path := os.path.join(
                         "/".join(output_path.split("/")[:-1]),
-                        f"AI_generation{gen}",
+                        f"AI_gen{gen}",
                         f"{env}",
                     )
                 ),
@@ -307,7 +307,7 @@ def log_neu_per_env(
             )
 
         else:
-            npt_run[f"training/{scenario}/AI_generation{gen}/{env}/NEU"].upload(
+            npt_run[f"training/{scenario}/AI_gen{gen}/{env}/NEU"].upload(
                 fig_NEU, include_plotlyjs="cdn"
             )
 
@@ -323,7 +323,7 @@ def log_neu_per_env(
                     (
                         new_path := os.path.join(
                             "/".join(output_path.split("/")[:-1]),
-                            f"AI_generation{gen+1}",
+                            f"AI_gen{gen+1}",
                             f"{env}",
                         )
                     ),
@@ -340,7 +340,7 @@ def log_neu_per_env(
                 npt_run[f"training/train/{env}/NEU"].upload(
                     fig_NEU, include_plotlyjs="cdn"
                 )
-                npt_run[f"training/{scenario}/AI_generation{gen+1}/{env}/NEU"].upload(
+                npt_run[f"training/{scenario}/AI_gen{gen+1}/{env}/NEU"].upload(
                     fig_NEU, include_plotlyjs="cdn"
                 )
 
@@ -382,7 +382,7 @@ def log_neu_global(
 
     else:
         npt_run[f"training/train/NEU"].upload(fig_NEU, include_plotlyjs="cdn")
-        npt_run[f"training/{scenario}/AI_generation{generation}/NEU"].upload(
+        npt_run[f"training/{scenario}/AI_gen{generation}/NEU"].upload(
             fig_NEU, include_plotlyjs="cdn"
         )
 

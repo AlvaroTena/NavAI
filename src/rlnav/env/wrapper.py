@@ -5,7 +5,6 @@ from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
-
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
 from navutils.logger import Logger
@@ -111,14 +110,14 @@ class RLWrapper(Wrapper):
         ):
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Error processing PE: ",
                 use_AI=self.use_AI,
             )
             if not self.close_PE():
                 Logger.log_message(
                     Logger.Category.ERROR,
-                    Logger.Module.MAIN,
+                    Logger.Module.WRAPPER,
                     f"Error closing files of PE: ",
                     use_AI=self.use_AI,
                 )
@@ -129,7 +128,7 @@ class RLWrapper(Wrapper):
                 _, pe_state, _ = result
                 Logger.log_message(
                     Logger.Category.ERROR,
-                    Logger.Module.MAIN,
+                    Logger.Module.WRAPPER,
                     f"Error processing PE: {pe_state}",
                     use_AI=self.use_AI,
                 )
@@ -143,7 +142,7 @@ class RLWrapper(Wrapper):
             if prev_pe_epoch > pe_epoch:
                 Logger.log_message(
                     Logger.Category.ERROR,
-                    Logger.Module.MAIN,
+                    Logger.Module.WRAPPER,
                     f"PE_Wrapper processed old epoch: {pe_epoch.calendar_column_str_d()} | Prev epoch: {prev_pe_epoch.calendar_column_str_d()}",
                     self.use_AI,
                 )
@@ -154,7 +153,7 @@ class RLWrapper(Wrapper):
                 if not (result := self.compute())[0]:
                     Logger.log_message(
                         Logger.Category.ERROR,
-                        Logger.Module.MAIN,
+                        Logger.Module.WRAPPER,
                         f"Error processing PE: ",
                         self.use_AI,
                     )
@@ -174,7 +173,7 @@ class RLWrapper(Wrapper):
         ):
             Logger.log_message(
                 Logger.Category.DEBUG,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Error terminating processing",
                 self.use_AI,
             )
@@ -186,7 +185,7 @@ class RLWrapper(Wrapper):
 
         Logger.log_message(
             Logger.Category.DEBUG,
-            Logger.Module.MAIN,
+            Logger.Module.WRAPPER,
             f" Wrapper processing finished!",
             self.use_AI,
         )
@@ -206,7 +205,7 @@ class RLWrapper(Wrapper):
 
         Logger.log_message(
             Logger.Category.DEBUG,
-            Logger.Module.MAIN,
+            Logger.Module.WRAPPER,
             f" Launching wrapper file data processing",
             self.use_AI,
         )
@@ -221,7 +220,7 @@ class RLWrapper(Wrapper):
         if not self.state_machine_.ProcessSignal(SafeStateMachineSignal.START_SIGNAL):
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.STATE_MACHINE,
                 f"Could not initialize Safe State Machine",
                 self.use_AI,
             )
@@ -230,7 +229,7 @@ class RLWrapper(Wrapper):
         if not (result := self.position_engine_.GetGnssCdVersion())[0]:
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f" Error getting GnssCdVersion string",
                 self.use_AI,
             )
@@ -265,7 +264,7 @@ class RLWrapper(Wrapper):
         ):
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.ALGORITHM,
+                Logger.Module.WRAPPER,
                 f"Could not initialize Position Engine",
                 self.use_AI,
             )
@@ -296,7 +295,7 @@ class RLWrapper(Wrapper):
         if not hasattr(self, "wrapper_data"):
             Logger.log_message(
                 Logger.Category.WARNING,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Wrapper not initialized",
                 self.use_AI,
             )
@@ -365,7 +364,7 @@ class RLWrapper(Wrapper):
         except StopIteration:
             Logger.log_message(
                 Logger.Category.WARNING,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Finished wrapper data",
                 self.use_AI,
             )
@@ -377,7 +376,7 @@ class RLWrapper(Wrapper):
             ):
                 Logger.log_message(
                     Logger.Category.DEBUG,
-                    Logger.Module.MAIN,
+                    Logger.Module.WRAPPER,
                     f"Error terminating processing",
                     self.use_AI,
                 )
@@ -387,7 +386,7 @@ class RLWrapper(Wrapper):
 
             Logger.log_message(
                 Logger.Category.DEBUG,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f" Wrapper processing finished!",
                 self.use_AI,
             )
@@ -395,7 +394,7 @@ class RLWrapper(Wrapper):
         if state == "":
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 "Wrapper data bad formed",
                 self.use_AI,
             )
@@ -415,7 +414,7 @@ class RLWrapper(Wrapper):
             cs_msg = wrapper_epoch_data.loc[cs_data_filled].iloc[-1]["msg_data"]
             Logger.log_message(
                 Logger.Category.TRACE,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Loading CS msg  {epoch_str} {len(cs_msg)} ( {cs_msg} )",
                 self.use_AI,
             )
@@ -470,7 +469,7 @@ class RLWrapper(Wrapper):
 
         Logger.log_message(
             Logger.Category.TRACE,
-            Logger.Module.MAIN,
+            Logger.Module.WRAPPER,
             f"Launching process order {epoch_str}",
             self.use_AI,
         )
@@ -564,8 +563,8 @@ class RLWrapper(Wrapper):
 
         else:
             Logger.log_message(
-                Logger.Category.DEBUG,
-                Logger.Module.MAIN,
+                Logger.Category.INFO,
+                Logger.Module.WRAPPER,
                 f" Processed output {epoch_str} (  )",
                 self.use_AI,
             )

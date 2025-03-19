@@ -6,10 +6,9 @@ from enum import Enum, IntEnum
 from logging.handlers import QueueHandler, QueueListener
 from threading import Lock
 
+from navutils.singleton import Singleton
 from neptune import Run
 from neptune.integrations.python_logger import NeptuneHandler
-
-from navutils.singleton import Singleton
 
 
 def addLoggingLevel(levelName, levelNum, methodName=None):
@@ -118,6 +117,11 @@ class Logger(metaclass=Singleton):
         STATE_MACHINE = 14
         PE = 15
         LOGGER = 16
+        DATAPROCESSOR = 17
+        ENV = 18
+        WRAPPER = 19
+        REWARD = 20
+        MONITOR = 21
 
         def get_module_string(mod, use_AI: bool = None):
             module_dict = {
@@ -138,6 +142,11 @@ class Logger(metaclass=Singleton):
                 Logger.Module.STATE_MACHINE: "State machine",
                 Logger.Module.PE: "Position Engine",
                 Logger.Module.LOGGER: "Logger",
+                Logger.Module.DATAPROCESSOR: "Data Processor",
+                Logger.Module.ENV: "RL Environment",
+                Logger.Module.WRAPPER: "Wrapper",
+                Logger.Module.REWARD: "Reward manager",
+                Logger.Module.MONITOR: "Monitoring",
             }
             mod_str = module_dict.get(mod, "???").ljust(17)
 

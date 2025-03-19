@@ -1,10 +1,10 @@
 from typing import Optional
 
 import tensorflow as tf
+import tensorflow_probability as tfp
 from tf_agents.agents.ppo import ppo_policy, ppo_utils
 from tf_agents.distributions import utils as distribution_utils
 from tf_agents.networks import network
-from tf_agents.policies import actor_policy
 from tf_agents.specs import tensor_spec
 from tf_agents.trajectories import policy_step
 from tf_agents.trajectories import time_step as ts
@@ -48,11 +48,11 @@ class PPOPolicyMasked(ppo_policy.PPOPolicy):
 
         # nest_utils.assert_value_spec(value_output_spec, 'value_network') # Disabled for multi-objective case
 
-        # distribution_utils.assert_specs_are_compatible(
-        #     actor_output_spec,
-        #     action_spec,
-        #     "actor_network output spec does not match action spec",
-        # )
+        distribution_utils.assert_specs_are_compatible(
+            actor_output_spec,
+            action_spec,
+            "actor_network output spec does not match action spec",
+        )
 
         self._compute_value_and_advantage_in_train = (
             compute_value_and_advantage_in_train
@@ -170,7 +170,11 @@ class PPOPolicyMasked(ppo_policy.PPOPolicy):
         if self._collect:
             policy_info = {
                 "dist_params": ppo_utils.get_distribution_params(
-                    distributions,
+                    (
+                        distributions
+                        if not isinstance(distributions, tfp.distributions.Independent)
+                        else distributions.distribution
+                    ),
                     legacy_distribution_network=isinstance(
                         self._actor_network, network.DistributionNetwork
                     ),

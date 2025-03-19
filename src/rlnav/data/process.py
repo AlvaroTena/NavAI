@@ -44,7 +44,7 @@ class DataProcessor:
             name = f"AI_Multipath_{df['epoch'].iloc[0].strftime('%Y%m%d_%H%M%S')}"
             Logger.log_message(
                 Logger.Category.DEBUG,
-                Logger.Module.MAIN,
+                Logger.Module.DATAPROCESSOR,
                 f"Preprocessing {(len_df:=len(df))} rows from {name}",
             )
 
@@ -53,7 +53,7 @@ class DataProcessor:
             if verbose:
                 Logger.log_message(
                     Logger.Category.DEBUG,
-                    Logger.Module.MAIN,
+                    Logger.Module.DATAPROCESSOR,
                     f"{(n_bad:=len(bad_data))} ({(n_bad/len_df):.1%}) rows will be dropped as bad data",
                 )
             df.drop(bad_data, inplace=True)
@@ -76,7 +76,7 @@ class DataProcessor:
             if verbose:
                 Logger.log_message(
                     Logger.Category.DEBUG,
-                    Logger.Module.MAIN,
+                    Logger.Module.DATAPROCESSOR,
                     f"{(n_nan:=df.isna().any(axis=1).sum())} ({(n_nan/len_df):.1%}) rows from {name} will be dropped as NaN values",
                 )
             df.dropna(inplace=True)
@@ -104,7 +104,7 @@ class DataProcessor:
             if verbose:
                 Logger.log_message(
                     Logger.Category.DEBUG,
-                    Logger.Module.MAIN,
+                    Logger.Module.DATAPROCESSOR,
                     f"{outliers.sum()} rows from {name} will be dropped as outliers",
                 )
             df.drop(index=df[outliers].index, inplace=True)
@@ -114,7 +114,7 @@ class DataProcessor:
             et = time.time()
             Logger.log_message(
                 Logger.Category.DEBUG,
-                Logger.Module.MAIN,
+                Logger.Module.DATAPROCESSOR,
                 f"Preprocessed {name} (num rows: {len(df)})({str(dt.timedelta(seconds=(et-st)))})",
             )
 

@@ -178,7 +178,7 @@ def create_parallel_environment(
     except Exception as e:
         Logger.log_message(
             Logger.Category.ERROR,
-            Logger.Module.MAIN,
+            Logger.Module.ENV,
             f"Error initializing parallel environments: {e}",
         )
         raise
@@ -368,7 +368,7 @@ def train_agent(
     if not train_env.active_envs:
         Logger.log_message(
             Logger.Category.ERROR,
-            Logger.Module.MAIN,
+            Logger.Module.ENV,
             "No active environments found. Exiting training loop.",
         )
         return envs_times, agent_stats
@@ -394,7 +394,7 @@ def train_agent(
         if sub_envs_generations[0] != envs_generation[0]:
             new_path = os.path.join(
                 reward_manager.output_path,
-                f"AI_generation{sub_envs_generations[0]}",
+                f"AI_gen{sub_envs_generations[0]}",
             )
             reward_manager.set_output_path(new_path)
 
@@ -550,16 +550,19 @@ def train_agent(
         except WrapperDataAttributeError:
             pass
 
+        except StopIteration:
+            break
+
         finally:
             gc.collect()
 
     for i, sub_env in enumerate(train_env.active_envs):
         map_file = sub_env.call("update_map")()
+        npt_run[f"training/{scenario}/AI_gen{envs_generation[i]}/env_{i}/map"].upload(
+            map_file
+        )
         npt_run[
-            f"training/{scenario}/AI_generation{envs_generation[i]}/env_{i}/map"
-        ].upload(map_file)
-        npt_run[
-            f"training/{scenario}/AI_generation{envs_generation[i]}/env_{i}/reward"
+            f"training/{scenario}/AI_gen{envs_generation[i]}/env_{i}/reward"
         ].upload(sub_env.call("get_reward_filepath")())
 
     train_checkpointer.save(agent.train_step_counter.numpy())

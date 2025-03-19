@@ -160,9 +160,7 @@ class PE_Env(py_environment.PyEnvironment):
 
         self.gen += 1
 
-        output_path = os.path.join(
-            self.output_path, f"AI_generation_{self.gen}", self.name
-        )
+        output_path = os.path.join(self.output_path, f"AI_gen{self.gen}", self.name)
         os.makedirs(output_path, exist_ok=True)
 
         self.wrapper = RLWrapper(
@@ -216,7 +214,7 @@ class PE_Env(py_environment.PyEnvironment):
         ):
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 "Error processing PE: ",
                 use_AI=True,
             )
@@ -227,7 +225,7 @@ class PE_Env(py_environment.PyEnvironment):
         if isinstance(state, bool):
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.ENV,
                 "Failed to reset RL environment",
             )
             raise Exception
@@ -270,7 +268,7 @@ class PE_Env(py_environment.PyEnvironment):
             else:
                 Logger.log_message(
                     Logger.Category.ERROR,
-                    Logger.Module.MAIN,
+                    Logger.Module.ENV,
                     "Failed to process epochs RL environment",
                 )
                 raise Exception
@@ -312,7 +310,7 @@ class PE_Env(py_environment.PyEnvironment):
             _, ai_state, _ = result
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Error processing PE: {ai_state}",
                 use_AI=True,
             )
@@ -324,7 +322,7 @@ class PE_Env(py_environment.PyEnvironment):
         if self.prev_ai_epoch > ai_epoch:
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.ENV,
                 f"AI_Wrapper processed old epoch: {ai_epoch.calendar_column_str_d()} | Prev epoch: {self.prev_ai_epoch.calendar_column_str_d()}",
                 use_AI=True,
             )
@@ -346,7 +344,7 @@ class PE_Env(py_environment.PyEnvironment):
             if not self.wrapper.load_predictions_AI(self.prev_ai_epoch, predictions):
                 Logger.log_message(
                     Logger.Category.ERROR,
-                    Logger.Module.MAIN,
+                    Logger.Module.ENV,
                     f"Error loading predictions",
                     use_AI=True,
                 )
@@ -355,7 +353,7 @@ class PE_Env(py_environment.PyEnvironment):
         if not (result := self.wrapper.compute())[0]:
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Error processing PE: ",
                 use_AI=True,
             )
@@ -384,7 +382,7 @@ class PE_Env(py_environment.PyEnvironment):
         if not self.wrapper.close_PE():
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Error closing files of PE: ",
                 use_AI=True,
             )

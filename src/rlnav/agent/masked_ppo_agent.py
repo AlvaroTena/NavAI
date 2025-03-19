@@ -32,16 +32,7 @@ def build_mask_for_heads(mask_bin: tf.Tensor) -> tf.Tensor:
     if rank not in (2, 3):
         raise ValueError("mask_bin must be of rank 2 or 3.")
 
-    # Convert binary mask to boolean and add a dimension
-    valid_sat = tf.cast(mask_bin, tf.bool)[
-        ..., tf.newaxis
-    ]  # (B, 286, 1) or (B, T, 286, 1)
-
-    # Create tensor of all True values with same shape
-    all_true = tf.ones_like(valid_sat, dtype=tf.bool)
-
-    # Concatenate to create final mask
-    return tf.concat([all_true, valid_sat], axis=-1)
+    return tf.cast(mask_bin, tf.bool)
 
 
 def splitter(
