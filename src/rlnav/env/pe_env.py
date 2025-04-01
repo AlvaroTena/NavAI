@@ -216,7 +216,6 @@ class PE_Env(py_environment.PyEnvironment):
                 Logger.Category.ERROR,
                 Logger.Module.WRAPPER,
                 "Error processing PE: ",
-                use_AI=True,
             )
             self._close_wrapper()
             raise RuntimeError
@@ -312,7 +311,6 @@ class PE_Env(py_environment.PyEnvironment):
                 Logger.Category.ERROR,
                 Logger.Module.WRAPPER,
                 f"Error processing PE: {ai_state}",
-                use_AI=True,
             )
             return False
 
@@ -324,7 +322,6 @@ class PE_Env(py_environment.PyEnvironment):
                 Logger.Category.ERROR,
                 Logger.Module.ENV,
                 f"AI_Wrapper processed old epoch: {ai_epoch.calendar_column_str_d()} | Prev epoch: {self.prev_ai_epoch.calendar_column_str_d()}",
-                use_AI=True,
             )
 
         self.prev_ai_epoch = ai_epoch
@@ -346,7 +343,6 @@ class PE_Env(py_environment.PyEnvironment):
                     Logger.Category.ERROR,
                     Logger.Module.ENV,
                     f"Error loading predictions",
-                    use_AI=True,
                 )
                 return False, None
 
@@ -355,7 +351,6 @@ class PE_Env(py_environment.PyEnvironment):
                 Logger.Category.ERROR,
                 Logger.Module.WRAPPER,
                 f"Error processing PE: ",
-                use_AI=True,
             )
             return False, None
         _, ai_output = result
@@ -372,8 +367,7 @@ class PE_Env(py_environment.PyEnvironment):
         Logger.log_message(
             Logger.Category.INFO,
             Logger.Module.MAIN,
-            f"{RELEASE_INFO}, Commit ID PE_Wrapper: {self.commit_id}, {common_lib_commit_id}, started",
-            use_AI=True,
+            f"{RELEASE_INFO}, Commit ID RL_Wrapper: {self.commit_id}, {common_lib_commit_id}, started",
         )
 
         self.common_lib_commit_id = common_lib_commit_id.split(" ")[-1]
@@ -384,7 +378,6 @@ class PE_Env(py_environment.PyEnvironment):
                 Logger.Category.ERROR,
                 Logger.Module.WRAPPER,
                 f"Error closing files of PE: ",
-                use_AI=True,
             )
 
     def get_logging_data(self):

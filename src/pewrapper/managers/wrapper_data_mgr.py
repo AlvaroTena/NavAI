@@ -3,8 +3,11 @@ from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
+import swifter
+
 from navutils.logger import Logger
 from navutils.singleton import Singleton
+from pewrapper.managers.decoder_manager import Decoder_Manager
 from pewrapper.managers import ConfigurationManager
 from pewrapper.types.gps_time_wrapper import GPS_Time
 
@@ -18,6 +21,7 @@ class WrapperDataManager(metaclass=Singleton):
     ):
         self.configMgr_ = configMgr
         self._wrapper_file_data: pd.DataFrame = pd.DataFrame()
+        self.decoder_manager_ = Decoder_Manager(configMgr)
         self.initial_epoch = initial_epoch_constr
         self.final_epoch = final_epoch_constr
 
@@ -27,6 +31,7 @@ class WrapperDataManager(metaclass=Singleton):
         final_epoch_constr: GPS_Time,
     ):
         self.__init__(initial_epoch_constr, final_epoch_constr, self.configMgr_)
+        self.decoder_manager_.reset()
 
     def reset_epochs(
         self,
@@ -41,6 +46,8 @@ class WrapperDataManager(metaclass=Singleton):
         Logger.log_message(
             Logger.Category.DEBUG, Logger.Module.MAIN, " Parsing wrapper file"
         )
+
+        result = self.decoder_manager_.initialise()
 
         try:
             if filename.endswith(".parquet"):
@@ -114,20 +121,29 @@ class WrapperDataManager(metaclass=Singleton):
                     df["msg_type"] == "ODOMETER", df["epoch"] + odo_latency, df["epoch"]
                 ),
             )
-            df.sort_values("epoch", inplace=True)
 
-            self._wrapper_file_data = df[["epoch", "msg_type", "msg_data"]]
+            df["gnss_epoch"] = pd.NaT
+            df.loc[df["msg_type"] == "GNSS", "gnss_epoch"] = self._extract_gnss_epochs(
+                df.loc[df["msg_type"] == "GNSS", "msg_data"]
+            )
+
+            df.sort_values("epoch", inplace=True)
+            df["gnss_epoch"] = df["gnss_epoch"].ffill()
+
+            self._wrapper_file_data = df[
+                ["epoch", "gnss_epoch", "msg_type", "msg_data"]
+            ]
 
             Logger.log_message(
                 Logger.Category.DEBUG,
                 Logger.Module.READER,
                 f" Wrapper file processed (Number of lines: {wrapper_lines})",
             )
-            result = True
+            result &= True
 
         except IOError as e:
             addInfo = f"Unable to open file ({filename}): {e}"
-            result = False
+            result &= False
 
         return result, addInfo
 
@@ -297,7 +313,43 @@ class WrapperDataManager(metaclass=Singleton):
 
         return df[["epoch", "msg_type", "msg_data"]], addInfo
 
-    def items(self):
+    def _extract_gnss_epochs(self, df: pd.Series) -> pd.Series:
+        """Extract GNSS epochs from a series of GNSS message data.
+
+        Processes each GNSS message in the input Series by calling the decoder manager
+        to extract epoch information from each message.
+
+        Args:
+            df: A pandas Series containing GNSS message data (hex strings)
+
+        Returns:
+            A pandas Series containing the extracted GNSS epochs (as pd.Timestamp objects)
+        """
+
+        def extract_epoch(msg_data: str):
+            if pd.isna(msg_data):
+                return pd.NaT
+            try:
+                raw_msg = bytes.fromhex(msg_data)
+            except Exception:
+                return pd.NaT
+
+            result, msg_result, epoch = (
+                self.decoder_manager_.extract_epoch_from_gnss_message(
+                    raw_msg, len(raw_msg)
+                )
+            )
+            if result and msg_result:
+                return pd.to_datetime(
+                    epoch.calendar_column_str_d(),
+                    format="%Y %m %d %H %M %S.%f",
+                )
+            else:
+                return pd.NaT
+
+        return df.swifter.apply(extract_epoch)
+
+    def _filter_epochs(self):
         initial_epoch = pd.to_datetime(
             self.initial_epoch.calendar_column_str_d(),
             format="%Y %m %d %H %M %S.%f",
@@ -306,46 +358,27 @@ class WrapperDataManager(metaclass=Singleton):
             self.final_epoch.calendar_column_str_d(),
             format="%Y %m %d %H %M %S.%f",
         )
-        df = self._wrapper_file_data[
-            (self._wrapper_file_data["epoch"] >= initial_epoch)
-            & (self._wrapper_file_data["epoch"] <= final_epoch)
+        return self._wrapper_file_data[
+            (self._wrapper_file_data["gnss_epoch"] >= initial_epoch)
+            & (self._wrapper_file_data["gnss_epoch"] <= final_epoch)
         ]
-        return df.to_numpy()
+
+    def items(self):
+        return self._filter_epochs().to_numpy()
 
     def get(
         self, key: GPS_Time, default=pd.DataFrame(columns=["msg_type", "msg_data"])
     ) -> pd.DataFrame:
-        initial_epoch = pd.to_datetime(
-            self.initial_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
-        final_epoch = pd.to_datetime(
-            self.final_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
-        df = self._wrapper_file_data[
-            (self._wrapper_file_data["epoch"] >= initial_epoch)
-            & (self._wrapper_file_data["epoch"] <= final_epoch)
-        ]
-        return df.loc[
-            df["epoch"]
+        df = self._filter_epochs()
+        result = df.loc[
+            df["gnss_epoch"]
             == pd.to_datetime(
                 key.calendar_column_str_d(), format="%Y %m %d %H %M %S.%f"
             ),
             ["msg_type", "msg_data"],
         ]
+        return result if not result.empty else default
 
     def __iter__(self):
-        initial_epoch = pd.to_datetime(
-            self.initial_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
-        final_epoch = pd.to_datetime(
-            self.final_epoch.calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
-        )
-        df = self._wrapper_file_data[
-            (self._wrapper_file_data["epoch"] >= initial_epoch)
-            & (self._wrapper_file_data["epoch"] <= final_epoch)
-        ]
+        df = self._filter_epochs()
         return iter(df.groupby("epoch"))

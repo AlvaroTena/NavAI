@@ -123,7 +123,7 @@ class Logger(metaclass=Singleton):
         REWARD = 20
         MONITOR = 21
 
-        def get_module_string(mod, use_AI: bool = None):
+        def get_module_string(mod):
             module_dict = {
                 Logger.Module.NONE: "No specific mod.",
                 Logger.Module.RECEIVER: "Receiver handler",
@@ -150,17 +150,12 @@ class Logger(metaclass=Singleton):
             }
             mod_str = module_dict.get(mod, "???").ljust(17)
 
-            if use_AI is None:
-                return mod_str
-            else:
-                ai_str = "AI" if use_AI else "  "
-                return f"{ai_str}] [{mod_str}"
+            return mod_str
 
     def __init__(
         self,
         output_path: str,
         npt_run: Run = None,
-        use_dual_logging=False,
         log_queue=None,
     ):
         """Initializes the Logger instance."""
@@ -168,8 +163,6 @@ class Logger(metaclass=Singleton):
             return
         else:
             Logger._instance = self
-
-            self.use_dual_logging = use_dual_logging
 
             self.log_dir = os.path.join(output_path, "pe_log_files")
             os.makedirs(self.log_dir, exist_ok=True)
@@ -207,11 +200,6 @@ class Logger(metaclass=Singleton):
 
     def _initialize_handlers(self, npt_run):
         """Initializes log handlers."""
-        # if self.use_dual_logging:
-        #     ai_handler = self._create_file_handler("ai_wrapper_session.log", True)
-        #     regular_handler = self._create_file_handler("wrapper_session.log", False)
-        #     self.handlers.extend([ai_handler, regular_handler])
-        # else:
         regular_handler = self._create_file_handler("wrapper_session.log", False)
         self.handlers.append(regular_handler)
 
@@ -246,7 +234,7 @@ class Logger(metaclass=Singleton):
         return cls._instance
 
     @staticmethod
-    def log_message(level: Category, module: Module, message: str, use_AI: bool = None):
+    def log_message(level: Category, module: Module, message: str, *args):
         """Logs a message at the specified logging level."""
         instance = Logger.get_instance()
         with instance.log_lock:
@@ -256,11 +244,10 @@ class Logger(metaclass=Singleton):
                     level=level,
                     pathname="",
                     lineno=0,
-                    msg=f"[{Logger.Module.get_module_string(module, use_AI if instance.use_dual_logging else None)}] {message.strip()}",
-                    args=None,
+                    msg=f"[{Logger.Module.get_module_string(module)}] {message.strip()}",
+                    args=args,
                     exc_info=None,
                 )
-                log_record.use_AI = use_AI
                 instance.logger.handle(log_record)
 
     @staticmethod

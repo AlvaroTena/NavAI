@@ -35,7 +35,7 @@ def RL_LogWrapper(
     }.get(category, Logger.Category.ERROR)
     message = eventParticulars.decode("utf-8")
     if level >= Logger.Category.ERROR:
-        Logger.log_message(level, Logger.Module.PE, f"{message}", use_AI=use_AI)
+        Logger.log_message(level, Logger.Module.PE, f"{message}")
 
 
 class WrapperManager:
@@ -474,7 +474,6 @@ class WrapperManager:
                 Logger.Category.ERROR,
                 Logger.Module.MAIN,
                 f"Error closing files of PE: ",
-                use_AI=True,
             )
 
     def _log_baseline_errors(self, pe_errors):
