@@ -2,7 +2,7 @@ base:
   project: RLNav
 
 neptune:
-  monitoring_times: True
+  monitoring_times: False
 
 scenarios:
   path: data/scenarios/
@@ -35,7 +35,7 @@ transformed_data:
 
 training:
   num_parallel_environments: 20
-  active_environments_per_iteration: 5
+  active_environments_per_iteration: 10
   rnn:
     enable: True
     window_size: 1

@@ -5,10 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
-from tf_agents.environments import py_environment
-from tf_agents.specs import array_spec
-from tf_agents.trajectories import time_step as ts
-
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
 from navutils.logger import Logger
@@ -18,6 +14,9 @@ from pewrapper.types.gps_time_wrapper import GPS_Time
 from rlnav.data.dataset import RLDataset
 from rlnav.env.wrapper import RLWrapper
 from rlnav.managers.reward_mgr import RewardManager
+from tf_agents.environments import py_environment
+from tf_agents.specs import array_spec
+from tf_agents.trajectories import time_step as ts
 
 ELEV_THRES = 30
 MIN_ELEV = 5
@@ -48,6 +47,35 @@ def get_transformers_min_max(transformers_path: str):
     )
 
 
+def create_observation_spec(min_values, max_values):
+    return array_spec.BoundedArraySpec(
+        shape=(
+            pe_const.MAX_SATS * pe_const.NUM_CHANNELS,
+            1 + len(const.PROCESSED_FEATURE_LIST),
+        ),
+        dtype=np.float32,
+        minimum=np.array([0.0] + min_values),
+        maximum=np.array([1.0] + max_values),
+        name="observation",
+    )
+
+
+def create_action_spec():
+    return array_spec.BoundedArraySpec(
+        shape=(pe_const.MAX_SATS * pe_const.NUM_CHANNELS,),
+        dtype=np.int32,
+        minimum=0,
+        maximum=1,
+        name=f"action",
+    )
+
+
+def create_reward_spec():
+    return array_spec.BoundedArraySpec(
+        shape=(3,), dtype=np.float32, minimum=-10.0, maximum=10.0, name="reward"
+    )
+
+
 class PE_Env(py_environment.PyEnvironment):
     def __init__(
         self,
@@ -58,43 +86,33 @@ class PE_Env(py_environment.PyEnvironment):
         max_values: list,
         transformers_path: str,
         output_path: str,
+        name: str,
         window_size=1,
         scenario: str = None,
-        generation: int = None,
+        num_generations: int = None,
     ):
         self.configMgr = configMgr
         self.wrapper_data = wrapper_data
         self.rewardMgr = rewardMgr
 
         self.scenario = scenario
-        self.gen = generation
+        self.gen = 0
+        self.num_generations = num_generations
         self.transformers_path = transformers_path
         self.output_path = output_path
+        self.name = name
 
         self.wrapper = None
 
-        self._action_spec = tuple(
-            array_spec.BoundedArraySpec(
-                shape=(), dtype=np.int32, minimum=0, maximum=1, name=f"action_{i}"
-            )
-            for i in range(pe_const.MAX_SATS * pe_const.NUM_CHANNELS)
-        )
-        self._observation_spec = array_spec.BoundedArraySpec(
-            shape=(
-                pe_const.MAX_SATS * pe_const.NUM_CHANNELS,
-                1 + len(const.PROCESSED_FEATURE_LIST),
-            ),
-            dtype=np.float32,
-            minimum=np.array([0.0] + min_values),
-            maximum=np.array([1.0] + max_values),
-            name="observation",
-        )
+        self._observation_spec = create_observation_spec(min_values, max_values)
+        self._action_spec = create_action_spec()
+        self._reward_spec = create_reward_spec()
 
         self.window_size = window_size
 
         self._state = np.zeros(self._observation_spec.shape, dtype=np.float32)
         self._episode_ended = False
-        self.completed_dataset_once = False
+        self.num_completed_dataset = 0
 
         self.reset_times()
 
@@ -127,10 +145,23 @@ class PE_Env(py_environment.PyEnvironment):
     def observation_spec(self):
         return self._observation_spec
 
+    def reward_spec(self):
+        return self._reward_spec
+
     def _reset(self):
+        if self.gen >= self.num_generations:
+            return ts.termination(
+                np.zeros(self._observation_spec.shape, dtype=np.float32),
+                np.zeros(self._reward_spec.shape, dtype=np.float32),
+                outer_dims=(),
+            )
+
         start = time.time()
 
-        os.makedirs(self.output_path, exist_ok=True)
+        self.gen += 1
+
+        output_path = os.path.join(self.output_path, f"AI_gen{self.gen}", self.name)
+        os.makedirs(output_path, exist_ok=True)
 
         self.wrapper = RLWrapper(
             self.configMgr,
@@ -170,19 +201,20 @@ class PE_Env(py_environment.PyEnvironment):
             generation=self.gen,
         )
         self._init_log()
-        self.rewardMgr.set_output_path(self.output_path, self.scenario, self.gen)
+        self.rewardMgr.next_generation()
+        self.rewardMgr.set_output_path(output_path)
         self.rewardMgr.reward_rec.initialize(
             self.wrapper.wrapper_file_data_.initial_epoch
         )
 
         if not self.wrapper._start_processing(
-            self.output_path,
+            output_path,
             self.commit_id,
             self.common_lib_commit_id,
         ):
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 "Error processing PE: ",
                 use_AI=True,
             )
@@ -193,14 +225,14 @@ class PE_Env(py_environment.PyEnvironment):
         if isinstance(state, bool):
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.ENV,
                 "Failed to reset RL environment",
             )
             raise Exception
 
         self._episode_ended = False
         self._times["reset_env"].append(time.time() - start)
-        return ts.restart(self._state)
+        return ts.restart(self._state, reward_spec=self._reward_spec)
 
     def _step(self, action):
         start = time.time()
@@ -227,22 +259,16 @@ class PE_Env(py_environment.PyEnvironment):
         _, ai_output = result
 
         reward = self.rewardMgr.compute_reward(ai_output)
-
-        epoch = GPS_Time(
-            w=ai_output.output_PE.timestamp_week, s=ai_output.output_PE.timestamp_second
-        )
-        self.rewardMgr.reward_rec.record(epoch, reward)
-
         state = self._check_state()
         if isinstance(state, bool):
             if state:
                 self._episode_ended = True
-                self.completed_dataset_once = True
+                self.num_completed_dataset += 1
 
             else:
                 Logger.log_message(
                     Logger.Category.ERROR,
-                    Logger.Module.MAIN,
+                    Logger.Module.ENV,
                     "Failed to process epochs RL environment",
                 )
                 raise Exception
@@ -250,11 +276,13 @@ class PE_Env(py_environment.PyEnvironment):
         self._times["step_env"].append(time.time() - start)
         if self._episode_ended:
             return ts.termination(
-                np.zeros(self._observation_spec.shape, dtype=np.float32), reward
+                np.zeros(self._observation_spec.shape, dtype=np.float32),
+                reward,
+                outer_dims=(),
             )
 
         else:
-            return ts.transition(self._state, reward)
+            return ts.transition(self._state, reward, outer_dims=())
 
     def _check_state(self):
         state = self._process_epochs()
@@ -282,7 +310,7 @@ class PE_Env(py_environment.PyEnvironment):
             _, ai_state, _ = result
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Error processing PE: {ai_state}",
                 use_AI=True,
             )
@@ -294,7 +322,7 @@ class PE_Env(py_environment.PyEnvironment):
         if self.prev_ai_epoch > ai_epoch:
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.ENV,
                 f"AI_Wrapper processed old epoch: {ai_epoch.calendar_column_str_d()} | Prev epoch: {self.prev_ai_epoch.calendar_column_str_d()}",
                 use_AI=True,
             )
@@ -316,7 +344,7 @@ class PE_Env(py_environment.PyEnvironment):
             if not self.wrapper.load_predictions_AI(self.prev_ai_epoch, predictions):
                 Logger.log_message(
                     Logger.Category.ERROR,
-                    Logger.Module.MAIN,
+                    Logger.Module.ENV,
                     f"Error loading predictions",
                     use_AI=True,
                 )
@@ -325,7 +353,7 @@ class PE_Env(py_environment.PyEnvironment):
         if not (result := self.wrapper.compute())[0]:
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Error processing PE: ",
                 use_AI=True,
             )
@@ -354,7 +382,7 @@ class PE_Env(py_environment.PyEnvironment):
         if not self.wrapper.close_PE():
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.WRAPPER,
                 f"Error closing files of PE: ",
                 use_AI=True,
             )
@@ -374,5 +402,8 @@ class PE_Env(py_environment.PyEnvironment):
     def get_reward_filepath(self):
         return self.rewardMgr.get_reward_filepath()
 
+    def get_generation(self):
+        return self.gen
+
     def is_done(self):
-        return self.completed_dataset_once
+        return self.num_completed_dataset >= self.num_generations

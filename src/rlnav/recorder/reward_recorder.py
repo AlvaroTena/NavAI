@@ -27,6 +27,7 @@ class RewardRecorder:
         header = [
             "epoch",
             "reward",
+            "cumulative_reward",
         ]
         self.csv_writer.writerow(header)
         Logger.log_message(
@@ -35,11 +36,11 @@ class RewardRecorder:
             f"Reward recording started, saving to {self.file_path}",
         )
 
-    def record(self, epoch: GPS_Time, reward):
+    def record(self, epoch: GPS_Time, reward, cumulative_reward):
         if not self.output_file or self.output_file.closed:
             raise ValueError("Recorder has not been initialized or has been closed")
 
-        row = [epoch.calendar_column_str_d(), reward]
+        row = [epoch.calendar_column_str_d(), reward, cumulative_reward]
         self.csv_writer.writerow(row)
         self.output_file.flush()
 

@@ -4,10 +4,9 @@ import os
 import shutil
 import time
 
-from neptune import Run
-
 import pewrapper.misc.parser_utils as parser_utils
 from navutils.logger import Logger
+from neptune import Run
 from pewrapper.api.common_api_types import Log_Handle, LogCategoryPE
 from pewrapper.managers import configuration_mgr, wrapper_data_mgr
 from pewrapper.types.gps_time_wrapper import GPS_Time
@@ -49,7 +48,6 @@ class WrapperManager:
         output_path,
         rewardMgr: reward_mgr.RewardManager,
         npt_run: Run,
-        num_generations=5,
     ):
         if os.path.exists(scenarios_path):
             self.scenarios_path = scenarios_path
@@ -68,7 +66,7 @@ class WrapperManager:
                 else:
                     Logger.log_message(
                         Logger.Category.WARNING,
-                        Logger.Module.NONE,
+                        Logger.Module.CONFIG,
                         f"Priority scenario '{priority_scen}' not found. Maintaining normal order.",
                     )
 
@@ -131,10 +129,7 @@ class WrapperManager:
         )
 
         self.scenario_it = iter(self.scenarios)
-        self.scenario = next(self.scenario_it)
-
-        self.num_generations = num_generations
-        self.scenario_generation = {scenario: -1 for scenario in self.scenarios}
+        self.scenario = None
 
     def reset_times(self):
         self._times = {}
@@ -149,91 +144,60 @@ class WrapperManager:
 
     def next_scenario(self, parsing_rate=0):
         start = time.time()
-        logs_npt = {}
-        addInfo = ""
 
         self.close_pe_wrapper()
         self.pe_wrapper.reset(self.configMgr, self.wrapper_data, self.rewardMgr, False)
 
+        prev_scenario = ""
+
+        try:
+            self.scenario = next(self.scenario_it)
+        except StopIteration:
+            Logger.log_message(
+                Logger.Category.WARNING,
+                Logger.Module.MAIN,
+                f"No more scenarios in {self.scenarios_path}",
+            )
+            return False
+
         if (
-            first_it := self.scenario_generation[self.scenario] == -1
-        ) or self.scenario_generation[self.scenario] >= self.num_generations:
-            time_dst = "next_scenario"
-            prev_scenario = ""
-
-            if first_it:
-                self.scenario_generation[self.scenario] = 1
-                logs_npt["generation"] = self.scenario_generation[self.scenario]
-
-            else:
-                try:
-                    prev_scenario = self.scenario
-                    self.scenario = next(self.scenario_it)
-                    self.scenario_generation[self.scenario] = 1
-                    logs_npt["generation"] = self.scenario_generation[self.scenario]
-
-                except StopIteration:
-                    Logger.log_message(
-                        Logger.Category.WARNING,
-                        Logger.Module.MAIN,
-                        f"No more scenarios in {self.scenarios_path}",
-                    )
-                    return False
-
-            logs_npt["scenario"] = self.scenario
-
-            if (
+            prev_scenario != ""
+            and (
                 is_scenario_subset(self.scenario) and is_scenario_subset(prev_scenario)
-            ) and (
+            )
+            and (
                 (parent_scenario_name := get_parent_scenario_name(self.scenario))
                 == get_parent_scenario_name(prev_scenario)
-            ):
-                if parent_scenario_name is not None:
-                    self._init_subscenario(parent_scenario_name)
-
-                else:
-                    raise ValueError("Error getting parent scenario name")
+            )
+        ):
+            if parent_scenario_name is not None:
+                self._init_subscenario(parent_scenario_name)
 
             else:
-                scenario_path = os.path.join(self.scenarios_path, self.scenario)
-                parent_scenario_name = ""
-                if not os.path.isdir(scenario_path) and is_scenario_subset(
-                    self.scenario
-                ):
-                    scenario_path = os.path.join(
-                        self.scenarios_path,
-                        (
-                            parent_scenario_name := get_parent_scenario_name(
-                                self.scenario
-                            )
-                        ),
-                    )
-                    subset = True
-
-                else:
-                    subset = False
-
-                self._init_scenario(scenario_path, parsing_rate)
-                if subset:
-                    self._init_subscenario(parent_scenario_name)
+                raise ValueError("Error getting parent scenario name")
 
         else:
-            time_dst = "restart_scenario"
-            self.scenario_generation[self.scenario] += 1
-            logs_npt["generation"] = self.scenario_generation[self.scenario]
-            self.rewardMgr.next_generation()
+            prev_scenario = self.scenario
+            scenario_path = os.path.join(self.scenarios_path, self.scenario)
+            parent_scenario_name = ""
+            if not os.path.isdir(scenario_path) and is_scenario_subset(self.scenario):
+                scenario_path = os.path.join(
+                    self.scenarios_path,
+                    (parent_scenario_name := get_parent_scenario_name(self.scenario)),
+                )
+                subset = True
 
-        self.rewardMgr.set_output_path(
-            os.path.join(
-                self.output_path,
-                f"AI_generation{(gen := self.scenario_generation[self.scenario])}",
-            ),
-            self.scenario,
-            gen,
-        )
+            else:
+                subset = False
 
-        self._log_npt["training"] = logs_npt
-        self._times[f"{time_dst}"].append(time.time() - start)
+            self._init_scenario(scenario_path, parsing_rate)
+            if subset:
+                self._init_subscenario(parent_scenario_name)
+
+        self.rewardMgr.set_output_path(os.path.normpath(self.output_path))
+
+        self._log_npt["training/scenario"] = self.scenario
+        self._times["next_scenario"].append(time.time() - start)
 
         return True
 
@@ -318,7 +282,7 @@ class WrapperManager:
 
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.READER,
                 log_msg,
             )
 
@@ -335,7 +299,7 @@ class WrapperManager:
 
             Logger.log_message(
                 Logger.Category.ERROR,
-                Logger.Module.MAIN,
+                Logger.Module.READER,
                 log_msg,
             )
 
