@@ -16,7 +16,6 @@ from rlnav.types.reference_types import ReferenceMode, ReferenceType
 from rlnav.utils.common import get_parent_scenario_name, is_scenario_subset
 
 
-@Log_Handle
 def RL_LogWrapper(
     category: ct.c_uint32,
     eventParticulars: ct.c_char_p,
@@ -41,67 +40,14 @@ def RL_LogWrapper(
 class WrapperManager:
     def __init__(
         self,
+        scenarios,
         scenarios_path,
-        n_scenarios,
-        priority_scen,
-        scenarios_subset,
         output_path,
         rewardMgr: reward_mgr.RewardManager,
         npt_run: Run,
     ):
-        if os.path.exists(scenarios_path):
-            self.scenarios_path = scenarios_path
-            all_scenarios = sorted(
-                [
-                    dir
-                    for dir in os.listdir(self.scenarios_path)
-                    if dir.startswith("scenario_") and not dir.endswith(".dvc")
-                ]
-            )
-
-            for scen in reversed(priority_scen):
-                if scen in all_scenarios:
-                    all_scenarios.remove(scen)
-                    all_scenarios.insert(0, scen)
-                else:
-                    Logger.log_message(
-                        Logger.Category.WARNING,
-                        Logger.Module.CONFIG,
-                        f"Priority scenario '{priority_scen}' not found. Maintaining normal order.",
-                    )
-
-            first_scen, last_scen = n_scenarios
-            if last_scen != -1:
-                self.scenarios = all_scenarios[first_scen:last_scen]
-
-            else:
-                self.scenarios = all_scenarios[first_scen:]
-
-            if scenarios_subset:
-                updated_scenarios = []
-                for scenario in self.scenarios:
-                    if any([scenario in subset for subset in scenarios_subset]):
-                        updated_scenarios.extend(
-                            [
-                                subset
-                                for subset in scenarios_subset
-                                if subset.startswith(scenario)
-                            ]
-                        )
-                    else:
-                        updated_scenarios.append(scenario)
-                self.scenarios = updated_scenarios
-
-        else:
-            log_msg = (
-                f"Error getting scenarios from non existing directory {scenarios_path}"
-            )
-            Logger.log_message(
-                Logger.Category.ERROR,
-                Logger.Module.CONFIG,
-                log_msg,
-            )
-            raise FileNotFoundError(log_msg)
+        self.scenarios = scenarios if isinstance(scenarios, list) else [scenarios]
+        self.scenarios_path = scenarios_path
 
         self.base_output_path = output_path
         self.output_path = output_path

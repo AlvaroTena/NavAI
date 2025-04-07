@@ -155,7 +155,6 @@ class Logger(metaclass=Singleton):
     def __init__(
         self,
         output_path: str,
-        npt_run: Run = None,
         log_queue=None,
     ):
         """Initializes the Logger instance."""
@@ -179,7 +178,7 @@ class Logger(metaclass=Singleton):
                 self.is_parent = False
 
             self.queue_handler = QueueHandler(self.log_queue)
-            self._initialize_handlers(npt_run)
+            self._initialize_handlers()
 
             self.log_lock = Lock()
             logging.basicConfig(
@@ -198,18 +197,13 @@ class Logger(metaclass=Singleton):
 
             addLoggingLevel("TRACE", Logger.Category.TRACE)
 
-    def _initialize_handlers(self, npt_run):
+    def _initialize_handlers(self):
         """Initializes log handlers."""
         regular_handler = self._create_file_handler("wrapper_session.log", False)
         self.handlers.append(regular_handler)
 
         self.stdout_handler = logging.StreamHandler(stream=sys.stdout)
         self.handlers.append(self.stdout_handler)
-
-        # if npt_run is not None:
-        #     self.handlers.append(
-        #         NeptuneHandler(run=npt_run, level=Logger.Category.ERROR, path="logs")
-        #     )
 
     def _create_file_handler(self, filename, use_ai):
         """Creates a file handler with the specified filename and filter."""

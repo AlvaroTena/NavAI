@@ -24,7 +24,9 @@ class Position_Engine_API:
 
     def __init__(self, lib_path=os.getenv("LD_LIBRARY_PATH")):
         try:
-            lib_paths = lib_path.split(":")
+            if lib_path is None:
+                lib_path = os.getenv("LD_LIBRARY_PATH")
+            lib_paths = lib_path.split(":") if ":" in lib_path else [lib_path]
             for path in lib_paths:
                 if os.path.exists(os.path.join(path, "libcommon_lib_PE_develop.so")):
                     lib_path = path

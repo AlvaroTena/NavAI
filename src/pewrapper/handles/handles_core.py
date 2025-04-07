@@ -34,7 +34,6 @@ def parse_binEphem(ephemData: ct.c_void_p, amountToRead: ct.c_size_t):
     return result
 
 
-@Log_Handle
 def PE_LogWrapper(
     category: ct.c_uint32,
     eventParticulars: ct.c_char_p,

@@ -6,6 +6,7 @@ import signal
 import sys
 import time
 import warnings
+from multiprocessing import Process
 from typing import Any
 
 import neptune
@@ -14,6 +15,7 @@ import pandas as pd
 import rlnav.utils.neptune_handler as npt_handler
 import tensorflow as tf
 from absl import logging as absl_logging
+from dotenv import load_dotenv
 from navutils.config import load_config
 from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
@@ -184,20 +186,162 @@ def create_parallel_environment(
         raise
 
 
-def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.Run):
-    enable_tensorboard_logging(npt_run)
+def load_scenarios_list(
+    scenarios_path, first_scen, last_scen, priority_scen, scenarios_subset
+):
+    scenarios = []
+
+    if os.path.exists(scenarios_path):
+        scenarios_path = scenarios_path
+        all_scenarios = sorted(
+            [
+                dir
+                for dir in os.listdir(scenarios_path)
+                if dir.startswith("scenario_") and not dir.endswith(".dvc")
+            ]
+        )
+
+        for scen in reversed(priority_scen):
+            if scen in all_scenarios:
+                all_scenarios.remove(scen)
+                all_scenarios.insert(0, scen)
+            else:
+                Logger.log_message(
+                    Logger.Category.WARNING,
+                    Logger.Module.CONFIG,
+                    f"Priority scenario '{priority_scen}' not found. Maintaining normal order.",
+                )
+
+        if last_scen != -1:
+            scenarios = all_scenarios[first_scen:last_scen]
+
+        else:
+            scenarios = all_scenarios[first_scen:]
+
+        if scenarios_subset:
+            updated_scenarios = []
+            for scenario in scenarios:
+                if any([scenario in subset for subset in scenarios_subset]):
+                    updated_scenarios.extend(
+                        [
+                            subset
+                            for subset in scenarios_subset
+                            if subset.startswith(scenario)
+                        ]
+                    )
+                else:
+                    updated_scenarios.append(scenario)
+            scenarios = updated_scenarios
+
+    else:
+        log_msg = (
+            f"Error getting scenarios from non existing directory {scenarios_path}"
+        )
+        Logger.log_message(
+            Logger.Category.ERROR,
+            Logger.Module.CONFIG,
+            log_msg,
+        )
+        raise FileNotFoundError(log_msg)
+
+    return scenarios
+
+
+def run_scenario(scen, scen_path, min_max_values, config, output_path, parsing_rate):
+    run_id = os.getenv("NEPTUNE_CUSTOM_RUN_ID")
+    run_name = f"{run_id}-{scen[0]}"
+    npt_run = neptune.init_run(
+        project="AI-PE/RL-GSharp",
+        custom_run_id=run_name,
+        name=scen[1],
+        monitoring_namespace="monitoring/03_agent_training",
+        source_files=["config/RLNav/params.yaml", "src/rlnav/**/*.py"],
+        api_token=os.getenv("NEPTUNE_API_TOKEN"),
+    )
+    npt_run["sys/group_tags"].add(run_id)
+    exit_code = run_training_loop(
+        scen[1], scen_path, min_max_values, config, output_path, parsing_rate, npt_run
+    )
+    npt_run.stop()
+    return exit_code
+
+
+def training_orchestrator(config_path, output_path, parsing_rate):
+    load_dotenv()
     config = load_config(config_path)
 
-    min_values, max_values = get_transformers_min_max(
+    scenarios_path = config.scenarios.path
+    first_scen = config.scenarios.skip_first
+    last_scen = config.scenarios.n_scenarios
+    priority_scen = config.scenarios.priority
+    scenarios_subset = config.scenarios.subscenarios
+
+    min_max_values = get_transformers_min_max(
         os.path.join(config.transformed_data.path, "transforms")
     )
 
+    scenarios = load_scenarios_list(
+        scenarios_path, first_scen, last_scen, priority_scen, scenarios_subset
+    )
+
+    current_process = None
+    try:
+        for i, scen in enumerate(scenarios):
+            current_process = Process(
+                target=run_scenario,
+                args=(
+                    (i, scen),
+                    scenarios_path,
+                    min_max_values,
+                    config,
+                    output_path,
+                    parsing_rate,
+                ),
+            )
+            current_process.start()
+            current_process.join()
+
+            if current_process.exitcode != 0:
+                Logger.log_message(
+                    Logger.Category.ERROR,
+                    Logger.Module.MAIN,
+                    f"Scenario {scen} failed with exit code {current_process.exitcode}. Stopping further execution.",
+                )
+                return EXIT_FAILURE
+
+    except UserInterruptException as exception:
+        Logger.log_message(
+            Logger.Category.INFO,
+            Logger.Module.MAIN,
+            f"{exception.get_msg()}",
+        )
+
+        if current_process is not None and current_process.is_alive():
+            current_process.terminate()
+            current_process.join()
+
+        return EXIT_FAILURE
+
+    return EXIT_SUCCESS
+
+
+def run_training_loop(
+    scenarios,
+    scenarios_path,
+    min_max_values,
+    config,
+    output_path,
+    parsing_rate,
+    npt_run: neptune.Run,
+):
+    enable_tensorboard_logging(npt_run)
+
+    min_values, max_values = min_max_values
+
     baseRewardMgr = RewardManager()
     wrapperMgr = WrapperManager(
-        config.scenarios.path,
-        (config.scenarios.skip_first, config.scenarios.n_scenarios),
-        config.scenarios.priority,
-        config.scenarios.subscenarios,
+        scenarios,
+        scenarios_path,
         output_path,
         baseRewardMgr,
         npt_run,
@@ -609,15 +753,13 @@ def main(argv=sys.argv):
             f" Parsing rate input not received. Epochs are processed without rate filter",
         )
 
-    return_value = run_training_loop(
+    return_value = training_orchestrator(
         args.config_file_path,
         args.output_path,
         args.parsing_rate,
-        run,
     )
 
     Logger.reset()
-    run.stop()
 
     return return_value
 
@@ -646,12 +788,14 @@ if __name__ == "__main__":
     args.output_path = os.path.normpath(os.path.join(args.output_path))
     sys.argv.insert(1, "--")  # This is needed to avoid absl flags parsing errors
 
-    run = neptune.init_run(
-        project="AI-PE/RL-GSharp",
-        monitoring_namespace="monitoring/03_agent_training",
-        source_files=["config/RLNav/params.yaml", "src/rlnav/**/*.py"],
-    )
-    Logger(args.output_path, run)
+    Logger(args.output_path)
+
+    from tf_agents.system import multiprocessing as mp
+
+    result = mp.handle_main(main)
+
+    sys.exit(result)
+    Logger(args.output_path)
 
     from tf_agents.system import multiprocessing as mp
 
