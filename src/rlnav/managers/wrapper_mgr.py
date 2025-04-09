@@ -340,7 +340,7 @@ class WrapperManager:
             final_epoch = final_epoch_session
 
         self.configMgr.reset_log_path(self.output_path)
-        self.wrapper_data.reset_epochs(initial_epoch, final_epoch)
+        self.wrapper_data.set_subset_epochs(initial_epoch, final_epoch)
 
         self.rewardMgr.limit_epochs(initial_epoch, final_epoch)
         pe_errors = self.rewardMgr.limit_baseline_log(initial_epoch, final_epoch)

@@ -23,7 +23,7 @@ from pewrapper.api.pe_api_types import (
 from pewrapper.managers import ConfigurationManager, OutputStr
 from pewrapper.managers.wrapper_data_mgr import WrapperDataManager
 from pewrapper.misc.version_wrapper_bin import RELEASE_INFO, about_msg
-from pewrapper.types.gps_time_wrapper import GPS_Time
+from pewrapper.types.gps_time_wrapper import CALENDAR_COLUMN_D_FORMAT, GPS_Time
 from pewrapper.wrapper_handler import Wrapper
 from rlnav.data.reader import Reader
 from rlnav.managers.reward_mgr import RewardManager
@@ -262,7 +262,9 @@ class RLWrapper(Wrapper):
         )
         self.position_recorder_.write_pos_header(pe_wrapper_commit, common_lib_commit)
 
-        self.wrapper_data = iter(self.wrapper_file_data_)
+        self.wrapper_data = self.wrapper_file_data_.get_iterator(
+            filter_subset=True, ignore_subset_initial_epoch=True
+        )
         self.imu_buffer: List[IMU_Measurements] = []
         self.odo_buffer: List[WheelSpeedData] = []
 
@@ -562,7 +564,7 @@ class RLWrapper(Wrapper):
                         feature.timestamp_week, feature.timestamp_second
                     ).calendar_column_str_d()
                     epoch_datetime = pd.to_datetime(
-                        epoch_str, format="%Y %m %d %H %M %S.%f"
+                        epoch_str, format=CALENDAR_COLUMN_D_FORMAT
                     )
 
                     if feature.constel == pe_const.E_CONSTELLATION.E_CONSTEL_GPS:

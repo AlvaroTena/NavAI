@@ -618,6 +618,9 @@ def train_agent(
                 envs_generation,
                 npt_run,
             )
+            for env, errors in next_gen_errors.items():
+                if env in envs_errors:
+                    envs_errors[env] = errors.copy(deep=False)
 
             loss.update(train_loss.loss.numpy())
             policy_gradient_loss.update(train_loss.extra.policy_gradient_loss.numpy())

@@ -2,7 +2,7 @@ import copy
 import math
 import time
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Optional, Union
 
 from pewrapper.misc.conversion_functions_wrapper import getFloor, getInt
 
@@ -28,6 +28,8 @@ GST_TIME_START_MJD_DAYS = 44244
 MJD_1980 = 44239
 YEAR_1980 = 1980
 
+CALENDAR_COLUMN_D_FORMAT = "%Y %m %d %H %M %S.%f"
+
 
 class MJD_Time:
     # Seconds offset between GST time and TAI
@@ -47,18 +49,18 @@ class MJD_Time:
 
     def __init__(
         self,
-        d=0,
-        s=0.0,
-        rhs=None,
-        time=None,
-        year=None,
-        month=None,
-        day=None,
-        hour=None,
-        minute=None,
-        second=None,
+        d: int = 0,
+        s: float = 0.0,
+        rhs: "MJD_Time" = None,
+        time: "GPS_Time" = None,
+        year: int = None,
+        month: int = None,
+        day: int = None,
+        hour: int = None,
+        minute: int = None,
+        second: float = None,
     ):
-        def initialize_year_day_second(year, day, second):
+        def initialize_year_day_second(year: int, day: int, second: float):
             siMjdDayOffset = 0
             for siYearIndex in range(YEAR_1980, year):
                 if not MJD_Time.isLeapYear(siYearIndex):
@@ -319,7 +321,7 @@ class GPS_Time:
             GPS_Time.leap_seconds_table_[date] = utc_tai - MJD_Time.TAI_GPS_OFFSET
 
     @staticmethod
-    def get_leap_seconds(date=None):
+    def get_leap_seconds(date: Optional["GPS_Time"] = None) -> int:
         if isinstance(date, GPS_Time):
             if not bool(GPS_Time.leap_seconds_table_):
                 return GPS_Time.leap_seconds_
@@ -381,18 +383,18 @@ class GPS_Time:
 
     def __init__(
         self,
-        w=0,
-        s=0,
-        rhs=None,
-        year=None,
-        month=None,
-        day=None,
-        doy=None,
-        hour=None,
-        minute=None,
-        second=None,
-        mjd_time=None,
-        unix_seconds=None,
+        w: int = 0,
+        s: float = 0.0,
+        rhs: "GPS_Time" = None,
+        year: int = None,
+        month: int = None,
+        day: int = None,
+        doy: int = None,
+        hour: int = None,
+        minute: int = None,
+        second: float = None,
+        mjd_time: MJD_Time = None,
+        unix_seconds: Union[int, float] = None,
     ):
         def initialize_from_mjd(mjd: MJD_Time):
             siDaysOffset = mjd.day - GST_TIME_START_MJD_DAYS
@@ -522,7 +524,7 @@ class GPS_Time:
             - GPS_Time.get_leap_seconds(self)
         )
 
-    def get_GPS_abs_seconds(self):
+    def get_GPS_abs_seconds(self) -> float:
         return self.week * GPS_Time.SECONDS_IN_WEEK + self.second
 
     def get_day_of_year(self):
@@ -649,29 +651,29 @@ class GPS_Time:
             self.__isub__(rhs)
             return self
 
-    def __eq__(self, other):
+    def __eq__(self, other: "GPS_Time"):
         return (
             math.fabs(self.get_GPS_abs_seconds() - other.get_GPS_abs_seconds())
             < COMP_THRES
         )
 
-    def __ne__(self, other):
+    def __ne__(self, other: "GPS_Time"):
         return not self.__eq__(other)
 
-    def __lt__(self, other):
+    def __lt__(self, other: "GPS_Time"):
         return (
             self.get_GPS_abs_seconds() < other.get_GPS_abs_seconds()
         ) and not self.__eq__(other)
 
-    def __gt__(self, other):
+    def __gt__(self, other: "GPS_Time"):
         return (
             self.get_GPS_abs_seconds() > other.get_GPS_abs_seconds()
         ) and not self.__eq__(other)
 
-    def __le__(self, other):
+    def __le__(self, other: "GPS_Time"):
         return self.__lt__(other) or self.__eq__(other)
 
-    def __ge__(self, other):
+    def __ge__(self, other: "GPS_Time"):
         return self.__gt__(other) or self.__eq__(other)
 
     def __str__(self):

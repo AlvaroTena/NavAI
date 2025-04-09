@@ -12,13 +12,15 @@ from geopy.point import Point
 from navutils.logger import Logger
 from pewrapper.api.pe_api_types import Latitude_Direction, Longitude_Direction
 from pewrapper.managers import OutputStr
-from pewrapper.types.gps_time_wrapper import GPS_Time
+from pewrapper.types.gps_time_wrapper import CALENDAR_COLUMN_D_FORMAT, GPS_Time
 from rlnav.managers.reference_datamanager import ReferenceDataManager, ReferenceMode
 from rlnav.recorder.reward_recorder import RewardRecorder
 from rlnav.types.reference_types import ReferenceMode, ReferenceType
 from rlnav.types.running_metric import RunningDiffMetric
 
-gps_start_date = pd.to_datetime("1980 1 6 0 0 0.000000", format="%Y %m %d %H %M %S.%f")
+gps_start_date = pd.to_datetime(
+    "1980 1 6 0 0 0.000000", format=CALENDAR_COLUMN_D_FORMAT
+)
 
 
 transformer_model = pyproj.Transformer.from_crs(
@@ -104,12 +106,12 @@ class RewardManager:
         if isinstance(initial_epoch, GPS_Time):
             initial_epoch = pd.to_datetime(
                 initial_epoch.calendar_column_str_d(),
-                format="%Y %m %d %H %M %S.%f",
+                format=CALENDAR_COLUMN_D_FORMAT,
             )
         if isinstance(final_epoch, GPS_Time):
             final_epoch = pd.to_datetime(
                 final_epoch.calendar_column_str_d(),
-                format="%Y %m %d %H %M %S.%f",
+                format=CALENDAR_COLUMN_D_FORMAT,
             )
 
         self.initial_epoch = initial_epoch
@@ -142,12 +144,12 @@ class RewardManager:
         if isinstance(initial_epoch, GPS_Time):
             initial_epoch = pd.to_datetime(
                 initial_epoch.calendar_column_str_d(),
-                format="%Y %m %d %H %M %S.%f",
+                format=CALENDAR_COLUMN_D_FORMAT,
             )
         if isinstance(final_epoch, GPS_Time):
             final_epoch = pd.to_datetime(
                 final_epoch.calendar_column_str_d(),
-                format="%Y %m %d %H %M %S.%f",
+                format=CALENDAR_COLUMN_D_FORMAT,
             )
 
         baseline = self.base_data[
@@ -338,7 +340,7 @@ class RewardManager:
             GPS_Time(
                 w=data.output_PE.timestamp_week, s=data.output_PE.timestamp_second
             ).calendar_column_str_d(),
-            format="%Y %m %d %H %M %S.%f",
+            format=CALENDAR_COLUMN_D_FORMAT,
         )
         record["RawEpoch"] = [raw_epoch]
         record["Epoch"] = [raw_epoch.round(freq="100ms")]
@@ -701,7 +703,7 @@ class RewardManager:
         if isinstance(epoch, GPS_Time):
             raw_epoch = pd.to_datetime(
                 epoch.calendar_column_str_d(),
-                format="%Y %m %d %H %M %S.%f",
+                format=CALENDAR_COLUMN_D_FORMAT,
             )
         else:
             raw_epoch = epoch
