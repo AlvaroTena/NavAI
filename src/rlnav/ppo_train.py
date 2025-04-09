@@ -537,7 +537,8 @@ def train_agent(
         # Update reward manager's output path if the first generation has changed
         if sub_envs_generations[0] != envs_generation[0]:
             new_path = os.path.join(
-                reward_manager.output_path,
+                output_path,
+                scenario,
                 f"AI_gen{sub_envs_generations[0]}",
             )
             reward_manager.set_output_path(new_path)
