@@ -2,6 +2,7 @@ import argparse
 import gc
 import logging
 import os
+import shutil
 import signal
 import sys
 import time
@@ -412,6 +413,16 @@ def run_training_loop(
 
                 train_env.close()
 
+                tracing_dirs = []
+                for current_dir, _, _ in os.walk(os.path.join(output_path, scenario)):
+                    if os.path.basename(current_dir) == "Tracing_Output":
+                        tracing_dirs.append(current_dir)
+
+                for tracing_dir in tracing_dirs:
+                    parent_dir = os.path.dirname(tracing_dir)
+                    shutil.make_archive(tracing_dir, "zip", root_dir=parent_dir)
+                    shutil.rmtree(tracing_dir)
+
                 policy_saver.save(agent.train_step_counter.numpy())
                 for policy_file in os.listdir(policy_dir):
                     npt_run[f"training/agent/policy/{policy_file}"].upload(
@@ -542,6 +553,9 @@ def train_agent(
                 f"AI_gen{sub_envs_generations[0]}",
             )
             reward_manager.set_output_path(new_path)
+            npt_run["training/generation"].upload(
+                max([gen for gen in sub_envs_generations if gen is not None])
+            )
 
         # Update envs_generation if the generations have changed
         if sub_envs_generations != envs_generation:
