@@ -22,7 +22,7 @@ from pewrapper.api.version_pe_api import ApiVersion
 class Position_Engine_API:
     MAX_CD_VERSION_STR_SIZE = 18
 
-    def __init__(self, lib_path=os.getenv("LD_LIBRARY_PATH")):
+    def __init__(self, lib_path=None):
         try:
             if lib_path is None:
                 lib_path = os.getenv("LD_LIBRARY_PATH")

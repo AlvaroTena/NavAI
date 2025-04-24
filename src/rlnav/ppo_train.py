@@ -268,7 +268,7 @@ def run_scenario(scen, scen_path, min_max_values, config, output_path, parsing_r
 
 
 def training_orchestrator(config_path, output_path, parsing_rate):
-    load_dotenv()
+    load_dotenv(override=True)
     config = load_config(config_path)
 
     scenarios_path = config.scenarios.path
