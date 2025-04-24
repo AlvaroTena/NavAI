@@ -357,6 +357,7 @@ class WrapperDataManager(metaclass=Singleton):
             else:
                 return pd.NaT
 
+        df.swifter._progress_bar = False
         return df.swifter.apply(extract_epoch)
 
     def _filter_epochs(

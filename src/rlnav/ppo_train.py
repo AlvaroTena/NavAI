@@ -383,7 +383,7 @@ def run_training_loop(
                     config.training.num_parallel_environments,
                 )
 
-                if config.neptune.monitoring_times:
+                if config.neptune.monitoring_times and npt_run._mode != "debug":
                     npt_run["monitoring/times"].extend(
                         remove_empty_lists(wrapperMgr.get_times())
                     )
@@ -424,10 +424,11 @@ def run_training_loop(
                     shutil.rmtree(tracing_dir)
 
                 policy_saver.save(agent.train_step_counter.numpy())
-                for policy_file in os.listdir(policy_dir):
-                    npt_run[f"training/agent/policy/{policy_file}"].upload(
-                        os.path.join(policy_dir, policy_file)
-                    )
+                if npt_run._mode != "debug":
+                    for policy_file in os.listdir(policy_dir):
+                        npt_run[f"training/agent/policy/{policy_file}"].upload(
+                            os.path.join(policy_dir, policy_file)
+                        )
 
                 del train_env
                 gc.collect()
@@ -553,9 +554,9 @@ def train_agent(
                 f"AI_gen{sub_envs_generations[0]}",
             )
             reward_manager.set_output_path(new_path)
-            npt_run["training/generation"].upload(
-                max([gen for gen in sub_envs_generations if gen is not None])
-            )
+            if npt_run._mode != "debug":
+                max_gen = max([gen for gen in sub_envs_generations if gen is not None])
+                npt_run["training/generation"] = max_gen
 
         # Update envs_generation if the generations have changed
         if sub_envs_generations != envs_generation:
@@ -586,7 +587,8 @@ def train_agent(
             del experience_filtered
 
             if log_times:
-                npt_run["monitoring/times"].extend(remove_empty_lists(times))
+                if npt_run._mode != "debug":
+                    npt_run["monitoring/times"].extend(remove_empty_lists(times))
 
                 envs_times = extract_computation_times(
                     train_env.active_envs, envs_times
@@ -659,7 +661,10 @@ def train_agent(
                 "clip_fraction": clip_fraction.get_running_value(),
             }
             training_recorder.record_metrics(train_metrics)
-            npt_run["training/train"].extend({k: [v] for k, v in train_metrics.items()})
+            if npt_run._mode != "debug":
+                npt_run["training/train"].extend(
+                    {k: [v] for k, v in train_metrics.items()}
+                )
 
             replay_buffer.clear()
 
@@ -679,13 +684,17 @@ def train_agent(
                     reward_manager.ai_positions = df_mean_positions
 
                 map_file = reward_manager.update_map(reset=True)
-                npt_run[f"training/train/map"].upload(map_file)
+                if npt_run._mode != "debug":
+                    npt_run[f"training/train/map"].upload(map_file)
                 del envs_positions
 
             # Guardar un checkpoint.
             if enable_checkpoint:
                 train_checkpointer.save(agent.train_step_counter.numpy())
-                if agent.train_step_counter.numpy() % 50 == 0:
+                if (
+                    agent.train_step_counter.numpy() % 50 == 0
+                    and npt_run._mode != "debug"
+                ):
                     if npt_run.exists(f"training/agent/checkpoint"):
                         del npt_run[f"training/agent/checkpoint"]
                     for checkpoint_file in os.listdir(checkpoint_dir):
@@ -720,18 +729,20 @@ def train_agent(
 
     for i, sub_env in enumerate(train_env.active_envs):
         map_file = sub_env.call("update_map")()
-        npt_run[f"training/{scenario}/AI_gen{envs_generation[i]}/env_{i}/map"].upload(
-            map_file
-        )
-        npt_run[
-            f"training/{scenario}/AI_gen{envs_generation[i]}/env_{i}/reward"
-        ].upload(sub_env.call("get_reward_filepath")())
+        if npt_run._mode != "debug":
+            npt_run[
+                f"training/{scenario}/AI_gen{envs_generation[i]}/env_{i}/map"
+            ].upload(map_file)
+            npt_run[
+                f"training/{scenario}/AI_gen{envs_generation[i]}/env_{i}/reward"
+            ].upload(sub_env.call("get_reward_filepath")())
 
     train_checkpointer.save(agent.train_step_counter.numpy())
-    for checkpoint_file in os.listdir(checkpoint_dir):
-        npt_run[f"training/agent/checkpoint/{checkpoint_file}"].upload(
-            os.path.join(checkpoint_dir, checkpoint_file)
-        )
+    if npt_run._mode != "debug":
+        for checkpoint_file in os.listdir(checkpoint_dir):
+            npt_run[f"training/agent/checkpoint/{checkpoint_file}"].upload(
+                os.path.join(checkpoint_dir, checkpoint_file)
+            )
 
     return envs_times, agent_stats
 
