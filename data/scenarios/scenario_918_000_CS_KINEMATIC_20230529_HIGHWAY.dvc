@@ -1,6 +1,6 @@
 outs:
-- md5: 307a962928b4c7f5f5a6cc18b6a5b707.dir
-  size: 85715352
-  nfiles: 6
+- md5: 34aadfcabd16d1e9ad38a627d706fe59.dir
+  size: 85715631
+  nfiles: 7
   hash: md5
   path: scenario_918_000_CS_KINEMATIC_20230529_HIGHWAY

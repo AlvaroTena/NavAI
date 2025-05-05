@@ -8,7 +8,7 @@ import sys
 import time
 import warnings
 from multiprocessing import Process
-from typing import Any
+from typing import Any, List
 
 import neptune
 import numpy as np
@@ -49,6 +49,18 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
+
+_CURRICULUM_ORDER = {
+    "LOWH_LOWV": 1,
+    "LOWH_MIDV": 2,
+    "LOWH_HIGHV": 3,
+    "MIDH_LOWV": 4,
+    "MIDH_MIDV": 5,
+    "MIDH_HIGHV": 6,
+    "HIGHH_LOWV": 7,
+    "HIGHH_MIDV": 8,
+    "HIGHH_HIGHV": 9,
+}
 
 eps = np.finfo(np.float32).eps.item()
 
@@ -188,56 +200,29 @@ def create_parallel_environment(
 
 
 def load_scenarios_list(
-    scenarios_path, first_scen, last_scen, priority_scen, scenarios_subset
-):
-    scenarios = []
+    scenarios_path: str,
+    first_scen: int,
+    last_scen: int,
+    priority_scen: List[str],
+    scenarios_subset: List[str],
+    curriculum_learning: bool = False,
+) -> List[str]:
+    """
+    Load and order scenario identifiers from disk, with optional curriculum learning.
 
-    if os.path.exists(scenarios_path):
-        scenarios_path = scenarios_path
-        all_scenarios = sorted(
-            [
-                dir
-                for dir in os.listdir(scenarios_path)
-                if dir.startswith("scenario_") and not dir.endswith(".dvc")
-            ]
-        )
+    Parameters:
+      scenarios_path: Path to scenario directories
+      first_scen: Number of scenarios to skip at start
+      last_scen: Number of scenarios to include (or -1 for all)
+      priority_scen: List of scenarios to prioritize before others
+      scenarios_subset: If non-empty, list of specific subscenarios to include
+      curriculum_learning: If True and scenarios_subset provided, sort subs by difficulty
 
-        for scen in reversed(priority_scen):
-            if scen in all_scenarios:
-                all_scenarios.remove(scen)
-                all_scenarios.insert(0, scen)
-            else:
-                Logger.log_message(
-                    Logger.Category.WARNING,
-                    Logger.Module.CONFIG,
-                    f"Priority scenario '{priority_scen}' not found. Maintaining normal order.",
-                )
-
-        if last_scen != -1:
-            scenarios = all_scenarios[first_scen:last_scen]
-
-        else:
-            scenarios = all_scenarios[first_scen:]
-
-        if scenarios_subset:
-            updated_scenarios = []
-            for scenario in scenarios:
-                if any([scenario in subset for subset in scenarios_subset]):
-                    updated_scenarios.extend(
-                        [
-                            subset
-                            for subset in scenarios_subset
-                            if subset.startswith(scenario)
-                        ]
-                    )
-                else:
-                    updated_scenarios.append(scenario)
-            scenarios = updated_scenarios
-
-    else:
-        log_msg = (
-            f"Error getting scenarios from non existing directory {scenarios_path}"
-        )
+    Returns:
+      List of scenario or subscenario names in the desired load order.
+    """
+    if not os.path.exists(scenarios_path):
+        log_msg = f"Scenarios directory not found: {scenarios_path}"
         Logger.log_message(
             Logger.Category.ERROR,
             Logger.Module.CONFIG,
@@ -245,7 +230,63 @@ def load_scenarios_list(
         )
         raise FileNotFoundError(log_msg)
 
-    return scenarios
+    # Discover all scenario directories
+    all_scenarios = sorted(
+        [
+            d
+            for d in os.listdir(scenarios_path)
+            if d.startswith("scenario_") and not d.endswith(".dvc")
+        ]
+    )
+
+    # Apply priority: move listed scenarios to front
+    for scen in reversed(priority_scen):
+        if scen in all_scenarios:
+            all_scenarios.remove(scen)
+            all_scenarios.insert(0, scen)
+        else:
+            Logger.log_message(
+                Logger.Category.WARNING,
+                Logger.Module.CONFIG,
+                f"Priority scenario '{priority_scen}' not found. Maintaining normal order.",
+            )
+
+    # Slice by first and last indices
+    if last_scen != -1:
+        selected = all_scenarios[first_scen:last_scen]
+    else:
+        selected = all_scenarios[first_scen:]
+
+    # If a subset of subscenarios is specified, expand selection
+    if scenarios_subset:
+        subs = []
+        for base in selected:
+            # Collect only those subs whose name starts with the base scenario
+            matches = [s for s in scenarios_subset if s.startswith(base)]
+            if matches:
+                subs.extend(matches)
+            else:
+                subs.append(base)
+        selected = subs
+
+        # If curriculum learning, sort subs by difficulty group
+        if curriculum_learning:
+
+            def _sort_key(name: str):
+                parts = name.split("_")
+                # Last two tokens form the group label
+                group_label = "_".join(parts[-2:])
+                order = _CURRICULUM_ORDER.get(group_label, float("inf"))
+                # Third-last token is the numeric index
+                try:
+                    index = int(parts[-3])
+                except (ValueError, IndexError):
+                    index = 0
+                return (order, index)
+
+            selected = sorted(selected, key=_sort_key)
+
+    return selected
 
 
 def run_scenario(scen, scen_path, min_max_values, config, output_path, parsing_rate):
@@ -276,13 +317,19 @@ def training_orchestrator(config_path, output_path, parsing_rate):
     last_scen = config.scenarios.n_scenarios
     priority_scen = config.scenarios.priority
     scenarios_subset = config.scenarios.subscenarios
+    curriculum_learning = config.scenarios.curriculum_learning
 
     min_max_values = get_transformers_min_max(
         os.path.join(config.transformed_data.path, "transforms")
     )
 
     scenarios = load_scenarios_list(
-        scenarios_path, first_scen, last_scen, priority_scen, scenarios_subset
+        scenarios_path,
+        first_scen,
+        last_scen,
+        priority_scen,
+        scenarios_subset,
+        curriculum_learning,
     )
 
     current_process = None
