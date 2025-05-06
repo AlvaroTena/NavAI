@@ -1,13 +1,13 @@
 import struct
-from pewrapper.types.gps_time_wrapper import GPS_Time
-import numpy as np
-import numpy.typing as npt
 from typing import Tuple
 
-from navutils.logger import Logger
-from pewrapper.types.constants import BITS_IN_BYTE
+import numpy as np
+import numpy.typing as npt
 import pewrapper.types.monitor_types as monitoring
 import pewrapper.types.utils_function as utils_function
+from navutils.logger import Logger
+from pewrapper.types.constants import BITS_IN_BYTE
+from pewrapper.types.gps_time_wrapper import GPS_Time
 from pewrapper.types.messages_details_common import GNSS_MESSAGE_TYPES
 
 
@@ -192,7 +192,8 @@ def compute_checksum(buff: bytes, lenght: int) -> tuple[int, int]:
     checksum_A = 0
     checksum_B = 0
 
-    for i in range(lenght):
+    actual_len = min(lenght, len(buff))
+    for i in range(actual_len):
         b = buff[i]
         checksum_A = (checksum_A + b) % 256
         checksum_B = (checksum_B + checksum_A) % 256

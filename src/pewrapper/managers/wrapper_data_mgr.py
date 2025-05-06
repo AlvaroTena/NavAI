@@ -1,9 +1,9 @@
 import re
+from multiprocessing import Pool, cpu_count
 from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import swifter
 from navutils.logger import Logger
 from navutils.singleton import Singleton
 from pewrapper.managers import ConfigurationManager
@@ -323,21 +323,21 @@ class WrapperDataManager(metaclass=Singleton):
 
         return df[["epoch", "msg_type", "msg_data"]], addInfo
 
-    def _extract_gnss_epochs(self, df: pd.Series) -> pd.Series:
+    def _extract_gnss_epochs(self, msg_series: pd.Series) -> pd.Series:
         """Extract GNSS epochs from a series of GNSS message data.
 
         Processes each GNSS message in the input Series by calling the decoder manager
         to extract epoch information from each message.
 
         Args:
-            df: A pandas Series containing GNSS message data (hex strings)
+            msg_series: A pandas Series containing GNSS message data (hex strings)
 
         Returns:
             A pandas Series containing the extracted GNSS epochs (as pd.Timestamp objects)
         """
 
         def extract_epoch(msg_data: str):
-            if pd.isna(msg_data):
+            if not isinstance(msg_data, str) or pd.isna(msg_data):
                 return pd.NaT
             try:
                 raw_msg = bytes.fromhex(msg_data)
@@ -357,8 +357,9 @@ class WrapperDataManager(metaclass=Singleton):
             else:
                 return pd.NaT
 
-        df.swifter._progress_bar = False
-        return df.swifter.apply(extract_epoch)
+        with Pool(processes=cpu_count()) as pool:
+            results = pool.map(extract_epoch, msg_series)
+        return pd.Series(results, index=msg_series.index)
 
     def _filter_epochs(
         self, filter_subset: bool = False, ignore_subset_initial_epoch: bool = False

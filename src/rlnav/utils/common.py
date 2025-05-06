@@ -8,6 +8,10 @@ MAX_SATS_PER_CONSTEL = {
     pe_const.E_CONSTELLATION.E_CONSTEL_BDS: pe_const.MAX_SATS_BDS,
 }
 
+_SUBSCENARIO_RE = re.compile(
+    r"_(?P<idx>\d+)_(?P<h>(?:LOWH|MIDH|HIGHH))_(?P<v>(?:LOWV|MIDV|HIGHV))$"
+)
+
 
 def get_global_sat_idx(cons_idx: int, sat_idx: int, freq_idx: int = None) -> int:
     global_offset = sum(
@@ -20,20 +24,11 @@ def get_global_sat_idx(cons_idx: int, sat_idx: int, freq_idx: int = None) -> int
     return global_offset + sat_idx
 
 
-def get_parent_scenario_name(scenario_name):
-    pattern = r"^(.*?\d{8})"
-    pattern_match = re.search(pattern, scenario_name)
-
-    if pattern_match:
-        return pattern_match.group(1)
-    else:
-        return scenario_name
+def is_scenario_subset(scenario_name: str) -> bool:
+    return bool(_SUBSCENARIO_RE.search(scenario_name))
 
 
-def is_scenario_subset(sceario_name):
-    if sceario_name:
-        parent = get_parent_scenario_name(sceario_name)
-        return len(sceario_name) > len(parent)
-
-    else:
-        return False
+def get_parent_scenario_name(scenario_name: str) -> str:
+    if is_scenario_subset(scenario_name):
+        return _SUBSCENARIO_RE.sub("", scenario_name)
+    return scenario_name

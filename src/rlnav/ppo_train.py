@@ -317,6 +317,7 @@ def training_orchestrator(config_path, output_path, parsing_rate):
     last_scen = config.scenarios.n_scenarios
     priority_scen = config.scenarios.priority
     scenarios_subset = config.scenarios.subscenarios
+    subscenarios_done = config.scenarios.subscenarios_done
     curriculum_learning = config.scenarios.curriculum_learning
 
     min_max_values = get_transformers_min_max(
@@ -331,10 +332,12 @@ def training_orchestrator(config_path, output_path, parsing_rate):
         scenarios_subset,
         curriculum_learning,
     )
+    if subscenarios_done:
+        scenarios = scenarios[subscenarios_done:]
 
     current_process = None
     try:
-        for i, scen in enumerate(scenarios):
+        for i, scen in enumerate(scenarios, start=subscenarios_done - 1):
             current_process = Process(
                 target=run_scenario,
                 args=(
@@ -382,7 +385,8 @@ def run_training_loop(
     parsing_rate,
     npt_run: neptune.Run,
 ):
-    enable_tensorboard_logging(npt_run)
+    if config.neptune.tensorboard:
+        enable_tensorboard_logging(npt_run)
 
     min_values, max_values = min_max_values
 
