@@ -2,8 +2,10 @@ import copy
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Union
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import pewrapper.types.constants as pe_const
 import rlnav.types.constants as const
@@ -216,7 +218,6 @@ class PE_Env(py_environment.PyEnvironment):
                 Logger.Category.ERROR,
                 Logger.Module.WRAPPER,
                 "Error processing PE: ",
-                use_AI=True,
             )
             self._close_wrapper()
             raise RuntimeError
@@ -284,24 +285,60 @@ class PE_Env(py_environment.PyEnvironment):
         else:
             return ts.transition(self._state, reward, outer_dims=())
 
-    def _check_state(self):
+    def _check_state(self) -> Union[npt.NDArray, bool]:
+        """
+        Process epochs and ensure valid state data is available.
+
+        Returns:
+            Union[npt.NDArray, bool]: The final processed state as an array if valid,
+            or a boolean value indicating processing status.
+        """
+
+        def _is_valid_state(state: pd.DataFrame) -> bool:
+            """
+            Validate if the state meets required criteria.
+
+            Args:
+                state: DataFrame containing state data to validate
+
+            Returns:
+                bool: True if state is valid, False otherwise
+            """
+            if state.empty:
+                return False
+
+            return (
+                self.rewardMgr.match_ref(self.prev_ai_epoch)
+                and self.prev_ai_epoch >= self.wrapper_data.subset_initial_epoch
+            )
+
         state = self._process_epochs()
 
+        # If state is not a DataFrame, return it immediately
+        if not isinstance(state, pd.DataFrame):
+            return state
+
+        # Continue processing until we have valid data or non-DataFrame state
+        while isinstance(state, pd.DataFrame):
+            # Break if we have valid data
+            if _is_valid_state(state):
+                break
+
+            # Ingest data if available but no reference match
+            if not state.empty:
+                self.dataset.ingest_data(state)
+
+            self._compute()
+            state = self._process_epochs()
+
+            # Exit if state is no longer a DataFrame
+            if not isinstance(state, pd.DataFrame):
+                return state
+
+        # Process the final state if it's a DataFrame
         if isinstance(state, pd.DataFrame):
-            while isinstance(state, pd.DataFrame) and (
-                state.empty
-                or not (ref_match := self.rewardMgr.match_ref(self.prev_ai_epoch))
-            ):
-                if not state.empty and not ref_match:
-                    self.dataset.ingest_data(state)
-
-                self._compute()
-                state = self._process_epochs()
-
-            if isinstance(state, pd.DataFrame):
-                state = self.dataset.process_data(state, self._observation_spec)
-
-                self._state = state
+            state = self.dataset.process_data(state, self._observation_spec)
+            self._state = state
 
         return state
 
@@ -312,7 +349,6 @@ class PE_Env(py_environment.PyEnvironment):
                 Logger.Category.ERROR,
                 Logger.Module.WRAPPER,
                 f"Error processing PE: {ai_state}",
-                use_AI=True,
             )
             return False
 
@@ -324,7 +360,6 @@ class PE_Env(py_environment.PyEnvironment):
                 Logger.Category.ERROR,
                 Logger.Module.ENV,
                 f"AI_Wrapper processed old epoch: {ai_epoch.calendar_column_str_d()} | Prev epoch: {self.prev_ai_epoch.calendar_column_str_d()}",
-                use_AI=True,
             )
 
         self.prev_ai_epoch = ai_epoch
@@ -346,7 +381,6 @@ class PE_Env(py_environment.PyEnvironment):
                     Logger.Category.ERROR,
                     Logger.Module.ENV,
                     f"Error loading predictions",
-                    use_AI=True,
                 )
                 return False, None
 
@@ -355,7 +389,6 @@ class PE_Env(py_environment.PyEnvironment):
                 Logger.Category.ERROR,
                 Logger.Module.WRAPPER,
                 f"Error processing PE: ",
-                use_AI=True,
             )
             return False, None
         _, ai_output = result
@@ -372,8 +405,7 @@ class PE_Env(py_environment.PyEnvironment):
         Logger.log_message(
             Logger.Category.INFO,
             Logger.Module.MAIN,
-            f"{RELEASE_INFO}, Commit ID PE_Wrapper: {self.commit_id}, {common_lib_commit_id}, started",
-            use_AI=True,
+            f"{RELEASE_INFO}, Commit ID RL_Wrapper: {self.commit_id}, {common_lib_commit_id}, started",
         )
 
         self.common_lib_commit_id = common_lib_commit_id.split(" ")[-1]
@@ -384,7 +416,6 @@ class PE_Env(py_environment.PyEnvironment):
                 Logger.Category.ERROR,
                 Logger.Module.WRAPPER,
                 f"Error closing files of PE: ",
-                use_AI=True,
             )
 
     def get_logging_data(self):

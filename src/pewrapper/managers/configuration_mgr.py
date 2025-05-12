@@ -1,7 +1,7 @@
 import ctypes as ct
 import os
 from configparser import ConfigParser
-from typing import Tuple
+from typing import Callable, Tuple
 
 from navutils.logger import Logger
 from navutils.singleton import Singleton
@@ -37,15 +37,45 @@ class ConfigurationManager(metaclass=Singleton):
         self,
         log_path: str,
         tracing_config_file: str,
-        log_handle: Log_Handle = PE_LogWrapper,  # type: ignore
-        binEphem_handle: f_handle_bin_ephem_NVM = parse_binEphem,  # type: ignore
-        ReportDTCStatus: f_handle_ReportDTCStatus = DtcManager.ReportDTCStatus,  # type: ignore
+        log_handle: Callable[
+            [
+                ct.c_uint32,
+                ct.c_char_p,
+                ct.c_char_p,
+                ct.c_char_p,
+                ct.c_uint16,
+                ct.c_bool,
+            ],
+            None,
+        ] = PE_LogWrapper,  # type: ignore
+        binEphem_handle: Callable[
+            [
+                ct.c_void_p,
+                ct.c_size_t,
+            ],
+            ct.c_bool,
+        ] = parse_binEphem,  # type: ignore
+        ReportDTCStatus: Callable[
+            [
+                ct.c_uint32,
+                ct.c_uint32,
+            ],
+            ct.c_bool,
+        ] = DtcManager.ReportDTCStatus,  # type: ignore
     ):
-        self.config_info_ = Configuration_info(
-            binEphem_handle=binEphem_handle,
-            log_handle=log_handle,
-            ReportDTCStatus=ReportDTCStatus,
-        )
+        if not isinstance(log_handle, ct._CFuncPtr):
+            self.log_handle_name_ = log_handle.__name__
+            self.config_info_ = Configuration_info(
+                binEphem_handle=binEphem_handle,
+                log_handle=Log_Handle(log_handle),
+                ReportDTCStatus=ReportDTCStatus,
+            )
+        else:
+            self.config_info_ = Configuration_info(
+                binEphem_handle=binEphem_handle,
+                log_handle=log_handle,
+                ReportDTCStatus=ReportDTCStatus,
+            )
         self.config_info_.log_path = log_path.encode("utf-8")
         self.config_info_.tracing_config_file = tracing_config_file.encode("utf-8")
         self.config_info_.log_category = get_pe_api_category(Logger.get_category())
@@ -125,9 +155,22 @@ class ConfigurationManager(metaclass=Singleton):
 
         serialized_config_info = self.__dict__["config_info_"]
 
+        log_handle_map = {
+            "PE_LogWrapper": PE_LogWrapper,
+        }
+
+        if self.log_handle_name_ == "RL_LogWrapper":
+            from rlnav.managers.wrapper_mgr import RL_LogWrapper
+
+            log_handle_map["RL_LogWrapper"] = RL_LogWrapper
+
         config_info = Configuration_info(
             binEphem_handle=parse_binEphem,
-            log_handle=PE_LogWrapper,
+            log_handle=Log_Handle(
+                log_handle_map[self.log_handle_name_]
+                if self.log_handle_name_ in log_handle_map
+                else PE_LogWrapper
+            ),
             ReportDTCStatus=DtcManager.ReportDTCStatus,
         )
 
@@ -205,9 +248,31 @@ class ConfigurationManager(metaclass=Singleton):
         self,
         log_path: str,
         tracing_config_file: str,
-        log_handle: Log_Handle = None,  # type: ignore
-        binEphem_handle: f_handle_bin_ephem_NVM = None,  # type: ignore
-        ReportDTCStatus: f_handle_ReportDTCStatus = None,  # type: ignore
+        log_handle: Callable[
+            [
+                ct.c_uint32,
+                ct.c_char_p,
+                ct.c_char_p,
+                ct.c_char_p,
+                ct.c_uint16,
+                ct.c_bool,
+            ],
+            None,
+        ] = None,  # type: ignore
+        binEphem_handle: Callable[
+            [
+                ct.c_void_p,
+                ct.c_size_t,
+            ],
+            ct.c_bool,
+        ] = None,  # type: ignore
+        ReportDTCStatus: Callable[
+            [
+                ct.c_uint32,
+                ct.c_uint32,
+            ],
+            ct.c_bool,
+        ] = None,  # type: ignore
     ):
         self.__init__(
             log_path,

@@ -2,11 +2,13 @@ import argparse
 import gc
 import logging
 import os
+import shutil
 import signal
 import sys
 import time
 import warnings
-from typing import Any
+from multiprocessing import Process
+from typing import Any, List
 
 import neptune
 import numpy as np
@@ -14,6 +16,7 @@ import pandas as pd
 import rlnav.utils.neptune_handler as npt_handler
 import tensorflow as tf
 from absl import logging as absl_logging
+from dotenv import load_dotenv
 from navutils.config import load_config
 from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
@@ -46,6 +49,18 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
+
+_CURRICULUM_ORDER = {
+    "LOWH_LOWV": 1,
+    "LOWH_MIDV": 2,
+    "LOWH_HIGHV": 3,
+    "MIDH_LOWV": 4,
+    "MIDH_MIDV": 5,
+    "MIDH_HIGHV": 6,
+    "HIGHH_LOWV": 7,
+    "HIGHH_MIDV": 8,
+    "HIGHH_HIGHV": 9,
+}
 
 eps = np.finfo(np.float32).eps.item()
 
@@ -184,20 +199,201 @@ def create_parallel_environment(
         raise
 
 
-def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.Run):
-    enable_tensorboard_logging(npt_run)
+def load_scenarios_list(
+    scenarios_path: str,
+    first_scen: int,
+    last_scen: int,
+    priority_scen: List[str],
+    scenarios_subset: List[str],
+    curriculum_learning: bool = False,
+) -> List[str]:
+    """
+    Load and order scenario identifiers from disk, with optional curriculum learning.
+
+    Parameters:
+      scenarios_path: Path to scenario directories
+      first_scen: Number of scenarios to skip at start
+      last_scen: Number of scenarios to include (or -1 for all)
+      priority_scen: List of scenarios to prioritize before others
+      scenarios_subset: If non-empty, list of specific subscenarios to include
+      curriculum_learning: If True and scenarios_subset provided, sort subs by difficulty
+
+    Returns:
+      List of scenario or subscenario names in the desired load order.
+    """
+    if not os.path.exists(scenarios_path):
+        log_msg = f"Scenarios directory not found: {scenarios_path}"
+        Logger.log_message(
+            Logger.Category.ERROR,
+            Logger.Module.CONFIG,
+            log_msg,
+        )
+        raise FileNotFoundError(log_msg)
+
+    # Discover all scenario directories
+    all_scenarios = sorted(
+        [
+            d
+            for d in os.listdir(scenarios_path)
+            if d.startswith("scenario_") and not d.endswith(".dvc")
+        ]
+    )
+
+    # Apply priority: move listed scenarios to front
+    for scen in reversed(priority_scen):
+        if scen in all_scenarios:
+            all_scenarios.remove(scen)
+            all_scenarios.insert(0, scen)
+        else:
+            Logger.log_message(
+                Logger.Category.WARNING,
+                Logger.Module.CONFIG,
+                f"Priority scenario '{priority_scen}' not found. Maintaining normal order.",
+            )
+
+    # Slice by first and last indices
+    if last_scen != -1:
+        selected = all_scenarios[first_scen:last_scen]
+    else:
+        selected = all_scenarios[first_scen:]
+
+    # If a subset of subscenarios is specified, expand selection
+    if scenarios_subset:
+        subs = []
+        for base in selected:
+            # Collect only those subs whose name starts with the base scenario
+            matches = [s for s in scenarios_subset if s.startswith(base)]
+            if matches:
+                subs.extend(matches)
+            else:
+                subs.append(base)
+        selected = subs
+
+        # If curriculum learning, sort subs by difficulty group
+        if curriculum_learning:
+
+            def _sort_key(name: str):
+                parts = name.split("_")
+                # Last two tokens form the group label
+                group_label = "_".join(parts[-2:])
+                order = _CURRICULUM_ORDER.get(group_label, float("inf"))
+                # Third-last token is the numeric index
+                try:
+                    index = int(parts[-3])
+                except (ValueError, IndexError):
+                    index = 0
+                return (order, index)
+
+            selected = sorted(selected, key=_sort_key)
+
+    return selected
+
+
+def run_scenario(scen, scen_path, min_max_values, config, output_path, parsing_rate):
+    run_id = os.getenv("NEPTUNE_CUSTOM_RUN_ID")
+    run_name = f"{run_id}-{scen[0]}"
+    npt_run = neptune.init_run(
+        project="AI-PE/RL-GSharp",
+        custom_run_id=run_name,
+        name=scen[1],
+        monitoring_namespace="monitoring/03_agent_training",
+        source_files=["config/RLNav/params.yaml", "src/rlnav/**/*.py"],
+        api_token=os.getenv("NEPTUNE_API_TOKEN"),
+    )
+    npt_run["sys/group_tags"].add(run_id)
+    exit_code = run_training_loop(
+        scen[1], scen_path, min_max_values, config, output_path, parsing_rate, npt_run
+    )
+    npt_run.stop()
+    return exit_code
+
+
+def training_orchestrator(config_path, output_path, parsing_rate):
+    load_dotenv(override=True)
     config = load_config(config_path)
 
-    min_values, max_values = get_transformers_min_max(
+    scenarios_path = config.scenarios.path
+    first_scen = config.scenarios.skip_first
+    last_scen = config.scenarios.n_scenarios
+    priority_scen = config.scenarios.priority
+    scenarios_subset = config.scenarios.subscenarios
+    subscenarios_done = config.scenarios.subscenarios_done
+    curriculum_learning = config.scenarios.curriculum_learning
+
+    min_max_values = get_transformers_min_max(
         os.path.join(config.transformed_data.path, "transforms")
     )
 
+    scenarios = load_scenarios_list(
+        scenarios_path,
+        first_scen,
+        last_scen,
+        priority_scen,
+        scenarios_subset,
+        curriculum_learning,
+    )
+    if subscenarios_done:
+        scenarios = scenarios[subscenarios_done:]
+
+    current_process = None
+    try:
+        for i, scen in enumerate(scenarios, start=subscenarios_done - 1):
+            current_process = Process(
+                target=run_scenario,
+                args=(
+                    (i, scen),
+                    scenarios_path,
+                    min_max_values,
+                    config,
+                    output_path,
+                    parsing_rate,
+                ),
+            )
+            current_process.start()
+            current_process.join()
+
+            if current_process.exitcode != 0:
+                Logger.log_message(
+                    Logger.Category.ERROR,
+                    Logger.Module.MAIN,
+                    f"Scenario {scen} failed with exit code {current_process.exitcode}. Stopping further execution.",
+                )
+                return EXIT_FAILURE
+
+    except UserInterruptException as exception:
+        Logger.log_message(
+            Logger.Category.INFO,
+            Logger.Module.MAIN,
+            f"{exception.get_msg()}",
+        )
+
+        if current_process is not None and current_process.is_alive():
+            current_process.terminate()
+            current_process.join()
+
+        return EXIT_FAILURE
+
+    return EXIT_SUCCESS
+
+
+def run_training_loop(
+    scenarios,
+    scenarios_path,
+    min_max_values,
+    config,
+    output_path,
+    parsing_rate,
+    npt_run: neptune.Run,
+):
+    if config.neptune.tensorboard:
+        enable_tensorboard_logging(npt_run)
+
+    min_values, max_values = min_max_values
+
     baseRewardMgr = RewardManager()
     wrapperMgr = WrapperManager(
-        config.scenarios.path,
-        (config.scenarios.skip_first, config.scenarios.n_scenarios),
-        config.scenarios.priority,
-        config.scenarios.subscenarios,
+        scenarios,
+        scenarios_path,
         output_path,
         baseRewardMgr,
         npt_run,
@@ -214,7 +410,7 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
     )
 
     policy_dir = os.path.join(output_path, "policy")
-    policy_saver = common.Checkpointer(ckpt_dir=policy_dir, policy=agent.collect_policy)
+    policy_saver = common.Checkpointer(ckpt_dir=policy_dir, policy=agent.policy)
 
     with TrainingRecorder(
         output_path=os.path.join(output_path, "Training_Tracing")
@@ -238,7 +434,7 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
                     config.training.num_parallel_environments,
                 )
 
-                if config.neptune.monitoring_times:
+                if config.neptune.monitoring_times and npt_run._mode != "debug":
                     npt_run["monitoring/times"].extend(
                         remove_empty_lists(wrapperMgr.get_times())
                     )
@@ -268,11 +464,22 @@ def run_training_loop(config_path, output_path, parsing_rate, npt_run: neptune.R
 
                 train_env.close()
 
+                tracing_dirs = []
+                for current_dir, _, _ in os.walk(os.path.join(output_path, scenario)):
+                    if os.path.basename(current_dir) == "Tracing_Output":
+                        tracing_dirs.append(current_dir)
+
+                for tracing_dir in tracing_dirs:
+                    parent_dir = os.path.dirname(tracing_dir)
+                    shutil.make_archive(tracing_dir, "zip", root_dir=parent_dir)
+                    shutil.rmtree(tracing_dir)
+
                 policy_saver.save(agent.train_step_counter.numpy())
-                for policy_file in os.listdir(policy_dir):
-                    npt_run[f"training/agent/policy/{policy_file}"].upload(
-                        os.path.join(policy_dir, policy_file)
-                    )
+                if npt_run._mode != "debug":
+                    for policy_file in os.listdir(policy_dir):
+                        npt_run[f"training/agent/policy/{policy_file}"].upload(
+                            os.path.join(policy_dir, policy_file)
+                        )
 
                 del train_env
                 gc.collect()
@@ -393,10 +600,14 @@ def train_agent(
         # Update reward manager's output path if the first generation has changed
         if sub_envs_generations[0] != envs_generation[0]:
             new_path = os.path.join(
-                reward_manager.output_path,
+                output_path,
+                scenario,
                 f"AI_gen{sub_envs_generations[0]}",
             )
             reward_manager.set_output_path(new_path)
+            if npt_run._mode != "debug":
+                max_gen = max([gen for gen in sub_envs_generations if gen is not None])
+                npt_run["training/generation"] = max_gen
 
         # Update envs_generation if the generations have changed
         if sub_envs_generations != envs_generation:
@@ -427,7 +638,8 @@ def train_agent(
             del experience_filtered
 
             if log_times:
-                npt_run["monitoring/times"].extend(remove_empty_lists(times))
+                if npt_run._mode != "debug":
+                    npt_run["monitoring/times"].extend(remove_empty_lists(times))
 
                 envs_times = extract_computation_times(
                     train_env.active_envs, envs_times
@@ -474,6 +686,9 @@ def train_agent(
                 envs_generation,
                 npt_run,
             )
+            for env, errors in next_gen_errors.items():
+                if env in envs_errors:
+                    envs_errors[env] = errors.copy(deep=False)
 
             loss.update(train_loss.loss.numpy())
             policy_gradient_loss.update(train_loss.extra.policy_gradient_loss.numpy())
@@ -497,7 +712,10 @@ def train_agent(
                 "clip_fraction": clip_fraction.get_running_value(),
             }
             training_recorder.record_metrics(train_metrics)
-            npt_run["training/train"].extend({k: [v] for k, v in train_metrics.items()})
+            if npt_run._mode != "debug":
+                npt_run["training/train"].extend(
+                    {k: [v] for k, v in train_metrics.items()}
+                )
 
             replay_buffer.clear()
 
@@ -517,13 +735,17 @@ def train_agent(
                     reward_manager.ai_positions = df_mean_positions
 
                 map_file = reward_manager.update_map(reset=True)
-                npt_run[f"training/train/map"].upload(map_file)
+                if npt_run._mode != "debug":
+                    npt_run[f"training/train/map"].upload(map_file)
                 del envs_positions
 
             # Guardar un checkpoint.
             if enable_checkpoint:
                 train_checkpointer.save(agent.train_step_counter.numpy())
-                if agent.train_step_counter.numpy() % 50 == 0:
+                if (
+                    agent.train_step_counter.numpy() % 50 == 0
+                    and npt_run._mode != "debug"
+                ):
                     if npt_run.exists(f"training/agent/checkpoint"):
                         del npt_run[f"training/agent/checkpoint"]
                     for checkpoint_file in os.listdir(checkpoint_dir):
@@ -558,18 +780,20 @@ def train_agent(
 
     for i, sub_env in enumerate(train_env.active_envs):
         map_file = sub_env.call("update_map")()
-        npt_run[f"training/{scenario}/AI_gen{envs_generation[i]}/env_{i}/map"].upload(
-            map_file
-        )
-        npt_run[
-            f"training/{scenario}/AI_gen{envs_generation[i]}/env_{i}/reward"
-        ].upload(sub_env.call("get_reward_filepath")())
+        if npt_run._mode != "debug":
+            npt_run[
+                f"training/{scenario}/AI_gen{envs_generation[i]}/env_{i}/map"
+            ].upload(map_file)
+            npt_run[
+                f"training/{scenario}/AI_gen{envs_generation[i]}/env_{i}/reward"
+            ].upload(sub_env.call("get_reward_filepath")())
 
     train_checkpointer.save(agent.train_step_counter.numpy())
-    for checkpoint_file in os.listdir(checkpoint_dir):
-        npt_run[f"training/agent/checkpoint/{checkpoint_file}"].upload(
-            os.path.join(checkpoint_dir, checkpoint_file)
-        )
+    if npt_run._mode != "debug":
+        for checkpoint_file in os.listdir(checkpoint_dir):
+            npt_run[f"training/agent/checkpoint/{checkpoint_file}"].upload(
+                os.path.join(checkpoint_dir, checkpoint_file)
+            )
 
     return envs_times, agent_stats
 
@@ -609,15 +833,13 @@ def main(argv=sys.argv):
             f" Parsing rate input not received. Epochs are processed without rate filter",
         )
 
-    return_value = run_training_loop(
+    return_value = training_orchestrator(
         args.config_file_path,
         args.output_path,
         args.parsing_rate,
-        run,
     )
 
     Logger.reset()
-    run.stop()
 
     return return_value
 
@@ -646,12 +868,14 @@ if __name__ == "__main__":
     args.output_path = os.path.normpath(os.path.join(args.output_path))
     sys.argv.insert(1, "--")  # This is needed to avoid absl flags parsing errors
 
-    run = neptune.init_run(
-        project="AI-PE/RL-GSharp",
-        monitoring_namespace="monitoring/03_agent_training",
-        source_files=["config/RLNav/params.yaml", "src/rlnav/**/*.py"],
-    )
-    Logger(args.output_path, run)
+    Logger(args.output_path)
+
+    from tf_agents.system import multiprocessing as mp
+
+    result = mp.handle_main(main)
+
+    sys.exit(result)
+    Logger(args.output_path)
 
     from tf_agents.system import multiprocessing as mp
 

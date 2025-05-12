@@ -136,7 +136,6 @@ def log_hv_per_env(
         del fig_HV
 
         if next_gen_errors and env in next_gen_errors:
-            cache_key = f"{env}_{gen+1}_HV"
             fig_HV = generate_HV_errors_plot(
                 baseline_errors=baseline_errors,
                 agent_errors=next_gen_errors[env].to_dict("index"),

@@ -38,20 +38,12 @@ RUN apt update \
     python3 \
     python3-pip \
     python3-dev \
-    pipx \
+    python3-venv \
+    python3-distutils \
     gdb \
     ssh \
     htop \
     nvtop
-
-RUN pipx ensurepath
-RUN pipx install poetry
-
-WORKDIR /rl_nav
-COPY pyproject.toml poetry.lock* ./
-
-RUN poetry install --no-interaction --no-ansi
-RUN poetry install --extras rl --no-interaction --no-ansi
 
 ARG USERNAME
 ARG USER_UID
@@ -70,10 +62,23 @@ RUN groupadd --gid $USER_GID $USERNAME \
 # ********************************************************
 # * Anything else you want to do like clean up goes here *
 # ********************************************************
-# Set the working directory for the new user
-WORKDIR /home/$USERNAME
 # [Optional] Set the default user. Omit if you want to keep the default as root.
 USER $USERNAME
+
+WORKDIR /home/$USERNAME/rl_nav
+
+RUN pip3 install --user pipx \
+    && python3 -m pipx ensurepath \
+    && python3 -m pipx install poetry
+
+ENV PATH="/home/$USERNAME/.local/bin:${PATH}"
+
+COPY pyproject.toml poetry.lock* README.md ./
+
+RUN poetry install --no-interaction --no-ansi --no-root --extras rl
+
+# Set the working directory for the new user
+WORKDIR /home/$USERNAME
 
 ENV OPENBLAS_NUM_THREADS=64
 ENV NUM_THREADS=64

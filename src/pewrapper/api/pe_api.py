@@ -22,9 +22,11 @@ from pewrapper.api.version_pe_api import ApiVersion
 class Position_Engine_API:
     MAX_CD_VERSION_STR_SIZE = 18
 
-    def __init__(self, lib_path=os.getenv("LD_LIBRARY_PATH")):
+    def __init__(self, lib_path=None):
         try:
-            lib_paths = lib_path.split(":")
+            if lib_path is None:
+                lib_path = os.getenv("LD_LIBRARY_PATH")
+            lib_paths = lib_path.split(":") if ":" in lib_path else [lib_path]
             for path in lib_paths:
                 if os.path.exists(os.path.join(path, "libcommon_lib_PE_develop.so")):
                     lib_path = path

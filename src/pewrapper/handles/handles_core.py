@@ -34,7 +34,6 @@ def parse_binEphem(ephemData: ct.c_void_p, amountToRead: ct.c_size_t):
     return result
 
 
-@Log_Handle
 def PE_LogWrapper(
     category: ct.c_uint32,
     eventParticulars: ct.c_char_p,
@@ -52,4 +51,4 @@ def PE_LogWrapper(
         LogCategoryPE.error.value: Logger.Category.ERROR,
     }.get(category, Logger.Category.ERROR)
     message = eventParticulars.decode("utf-8")
-    # Logger.log_message(level, Logger.Module.PE, f"{message}", use_AI=use_AI)
+    Logger.log_message(level, Logger.Module.PE, f"{message}")
