@@ -156,7 +156,7 @@ def decode_ubx_sec_crc(
     else:
         monitor_state.headerDataId = False
 
-    return result, monitor_state
+    return result, counter_init, gnss_counter, monitor_state
 
 
 def decode_ubx_rxm_rawx(msg: bytes, require_sec_crc: bool) -> Tuple[bool, GPS_Time]:

@@ -1,21 +1,20 @@
 from typing import Tuple
-import numpy as np
-from typing import Tuple
 
-from pewrapper.managers.configuration_mgr import ConfigurationManager
+import numpy as np
 import pewrapper.types.messages_decoder_ubx as UBX
+import pewrapper.types.monitor_types as monitoring
+import pewrapper.types.utils_function as util_functions
+from navutils.logger import Logger
+from pewrapper.managers.configuration_mgr import ConfigurationManager
+from pewrapper.types.constants import BITS_IN_BYTE
+from pewrapper.types.gps_time_wrapper import GPS_Time
 from pewrapper.types.messages_details_common import (
-    Msg_Decode_Info,
-    GNSS_MSG_PROTOCOL,
     GNSS_MESSAGE_TYPES,
+    GNSS_MSG_PROTOCOL,
+    Msg_Decode_Info,
+    Submsg_Decode_Info,
     fill_msg_decode_info,
 )
-import pewrapper.types.utils_function as util_functions
-import pewrapper.types.monitor_types as monitoring
-from pewrapper.types.constants import BITS_IN_BYTE
-from pewrapper.types.messages_details_common import Msg_Decode_Info, Submsg_Decode_Info
-from navutils.logger import Logger
-from pewrapper.types.gps_time_wrapper import GPS_Time
 
 CRC_TABLE_SIZE = 256
 
@@ -120,12 +119,14 @@ class UBX_Decoder:
 
         # Validate message with end-to-end CRC if required
         if require_e2e_msg:
-            valid_msg, monitor_state_sec_crc = UBX.decode_ubx_sec_crc(
-                msg[position_in_bytes:],
-                self._crc_table,
-                self._counter_init,
-                self._ubx_counter,
-                monitor_state_sec_crc,
+            valid_msg, self._counter_init, self._ubx_counter, monitor_state_sec_crc = (
+                UBX.decode_ubx_sec_crc(
+                    msg[position_in_bytes:],
+                    self._crc_table,
+                    self._counter_init,
+                    self._ubx_counter,
+                    monitor_state_sec_crc,
+                )
             )
 
             if valid_msg:

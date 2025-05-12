@@ -357,9 +357,7 @@ class WrapperDataManager(metaclass=Singleton):
             else:
                 return pd.NaT
 
-        with Pool(processes=cpu_count()) as pool:
-            results = pool.map(extract_epoch, msg_series)
-        return pd.Series(results, index=msg_series.index)
+        return msg_series.apply(extract_epoch)
 
     def _filter_epochs(
         self, filter_subset: bool = False, ignore_subset_initial_epoch: bool = False

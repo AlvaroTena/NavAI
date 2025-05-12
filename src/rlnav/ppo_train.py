@@ -410,7 +410,7 @@ def run_training_loop(
     )
 
     policy_dir = os.path.join(output_path, "policy")
-    policy_saver = common.Checkpointer(ckpt_dir=policy_dir, policy=agent.collect_policy)
+    policy_saver = common.Checkpointer(ckpt_dir=policy_dir, policy=agent.policy)
 
     with TrainingRecorder(
         output_path=os.path.join(output_path, "Training_Tracing")
