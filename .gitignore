@@ -6,3 +6,4 @@ out**
 .venv**
 .env
 .qodo
+notebooks/

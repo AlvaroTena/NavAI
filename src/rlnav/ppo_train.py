@@ -875,10 +875,3 @@ if __name__ == "__main__":
     result = mp.handle_main(main)
 
     sys.exit(result)
-    Logger(args.output_path)
-
-    from tf_agents.system import multiprocessing as mp
-
-    result = mp.handle_main(main)
-
-    sys.exit(result)
