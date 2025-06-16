@@ -92,12 +92,14 @@ class PE_Env(py_environment.PyEnvironment):
         window_size=1,
         scenario: str = None,
         num_generations: int = None,
+        filter_subset: bool = False,
     ):
         self.configMgr = configMgr
         self.wrapper_data = wrapper_data
         self.rewardMgr = rewardMgr
 
         self.scenario = scenario
+        self.filter_subset = filter_subset
         self.gen = 0
         self.num_generations = num_generations
         self.transformers_path = transformers_path
@@ -171,6 +173,7 @@ class PE_Env(py_environment.PyEnvironment):
             self.rewardMgr,
             use_AI=True,
             generation=self.gen,
+            filter_subset=self.filter_subset,
         )
 
         self.dataset = RLDataset(
@@ -307,9 +310,15 @@ class PE_Env(py_environment.PyEnvironment):
             if state.empty:
                 return False
 
+            initial_epoch = (
+                self.wrapper_data.subset_initial_epoch
+                if hasattr(self.wrapper_data, "subset_initial_epoch")
+                else self.wrapper_data.initial_epoch
+            )
+
             return (
                 self.rewardMgr.match_ref(self.prev_ai_epoch)
-                and self.prev_ai_epoch >= self.wrapper_data.subset_initial_epoch
+                and self.prev_ai_epoch >= initial_epoch
             )
 
         state = self._process_epochs()

@@ -72,6 +72,7 @@ class WrapperManager:
             self.wrapper_data,
             self.rewardMgr,
             use_AI=False,
+            filter_subset=False,
         )
 
         self.scenario_it = iter(self.scenarios)

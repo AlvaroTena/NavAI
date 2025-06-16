@@ -1,30 +1,29 @@
 import argparse
-import os
-import sys
-import signal
 import logging
-from tf_agents.environments import tf_py_environment
+import os
+import signal
+import sys
 
-from rlnav.env.pe_env import PE_Env
-from dotenv import load_dotenv
 import neptune
 import tensorflow as tf
-from tf_agents.specs import tensor_spec
-from tf_agents.utils import common
-
-from rlnav.ppo_train import create_parallel_environment, load_scenarios_list
+from dotenv import load_dotenv
 from navutils.config import load_config
-from rlnav.env.pe_env import (
-    get_transformers_min_max,
-    create_observation_spec,
-    create_action_spec,
-    create_reward_spec,
-)
+from navutils.logger import Logger
 from navutils.user_interrupt import UserInterruptException, signal_handler
 from rlnav.agent.ppo_agent import create_ppo_agent
-from rlnav.managers.wrapper_mgr import WrapperManager
+from rlnav.env.pe_env import (
+    PE_Env,
+    create_action_spec,
+    create_observation_spec,
+    create_reward_spec,
+    get_transformers_min_max,
+)
 from rlnav.managers.reward_mgr import RewardManager
-from navutils.logger import Logger
+from rlnav.managers.wrapper_mgr import WrapperManager
+from rlnav.ppo_train import create_parallel_environment, load_scenarios_list
+from tf_agents.environments import tf_py_environment
+from tf_agents.specs import tensor_spec
+from tf_agents.utils import common
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -45,7 +44,7 @@ def create_parser():
         help="Path to YAML configuration file",
     )
     parser.add_argument(
-        "-p",
+        "-i",
         "--policy_path",
         dest="policy_path",
         required=True,
@@ -73,7 +72,7 @@ def create_parser():
         type=int,
         help="Parsing rate for the wrapper (optional)",
     )
-    return parser.parse_args()
+    return parser
 
 
 def main():
@@ -167,6 +166,7 @@ def main():
             rewardMgr=wrapper_mgr.rewardMgr,
             scenario=wrapper_mgr.scenario,
             num_generations=config.scenarios.n_generations,
+            filter_subset=False,
             min_values=min_values,
             max_values=max_values,
             transformers_path=config.transformed_data.path,
@@ -181,7 +181,7 @@ def main():
         time_step = eval_env.reset()
         policy_state = agent.policy.get_initial_state(batch_size=eval_env.batch_size)
 
-        while not eval_env.is_done():
+        while not eval_env._env.envs[0].is_done():  # pylint: disable=protected-access
             policy_step = agent.policy.action(time_step, policy_state)
             time_step = eval_env.step(policy_step.action)
             policy_state = policy_step.state

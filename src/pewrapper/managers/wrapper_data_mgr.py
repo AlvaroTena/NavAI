@@ -376,14 +376,22 @@ class WrapperDataManager(metaclass=Singleton):
         initial_epoch_str = (
             self.initial_epoch.calendar_column_str_d()
             if not filter_subset or ignore_subset_initial_epoch
-            else self.subset_initial_epoch.calendar_column_str_d()
+            else (
+                self.subset_initial_epoch.calendar_column_str_d()
+                if hasattr(self, "subset_initial_epoch")
+                else self.initial_epoch.calendar_column_str_d()
+            )
         )
 
         # Determine final epoch based on parameters
         final_epoch_str = (
             self.final_epoch.calendar_column_str_d()
             if not filter_subset
-            else self.subset_final_epoch.calendar_column_str_d()
+            else (
+                self.subset_final_epoch.calendar_column_str_d()
+                if hasattr(self, "subset_final_epoch")
+                else self.final_epoch.calendar_column_str_d()
+            )
         )
 
         # Convert string representations to datetime objects

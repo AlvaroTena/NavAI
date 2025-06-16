@@ -42,6 +42,7 @@ class RLWrapper(Wrapper):
         rewardMgr: RewardManager,
         use_AI: bool = True,
         generation: int = None,
+        filter_subset: bool = False,
     ):
         super().__init__(
             "",
@@ -55,6 +56,7 @@ class RLWrapper(Wrapper):
         self.rewardMgr = rewardMgr
         self.use_AI = use_AI
         self.generation = generation
+        self.filter_subset = filter_subset
 
         self.reset_times()
 
@@ -65,8 +67,11 @@ class RLWrapper(Wrapper):
         rewardMgr: RewardManager,
         use_AI: bool = True,
         generation: int = None,
+        filter_subset: bool = False,
     ):
-        self.__init__(configMgr, wrapper_file_data, rewardMgr, use_AI, generation)
+        self.__init__(
+            configMgr, wrapper_file_data, rewardMgr, use_AI, generation, filter_subset
+        )
 
     def reset_times(self):
         self._times = {}
@@ -263,7 +268,7 @@ class RLWrapper(Wrapper):
         self.position_recorder_.write_pos_header(pe_wrapper_commit, common_lib_commit)
 
         self.wrapper_data = self.wrapper_file_data_.get_iterator(
-            filter_subset=True, ignore_subset_initial_epoch=True
+            filter_subset=self.filter_subset, ignore_subset_initial_epoch=True
         )
         self.imu_buffer: List[IMU_Measurements] = []
         self.odo_buffer: List[WheelSpeedData] = []

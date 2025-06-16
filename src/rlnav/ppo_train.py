@@ -116,12 +116,18 @@ class EnvCreator:
         """
         absl_logging.use_python_logging(quiet=True)
         Logger.reconfigure_child(log_queue=self.shared_queue)
+        if self.config.scenarios.subscenarios:
+            filter_subset = True
+        else:
+            filter_subset = False
+
         return PE_Env(
             configMgr=self.configMgr,
             wrapper_data=self.wrapper_data,
             rewardMgr=self.rewardMgr,
             scenario=self.scenario,
             num_generations=self.config.scenarios.n_generations,
+            filter_subset=filter_subset,
             min_values=self.min_values,
             max_values=self.max_values,
             transformers_path=self.config.transformed_data.path,
