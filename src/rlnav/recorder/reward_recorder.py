@@ -37,11 +37,24 @@ class RewardRecorder:
         )
 
     def record(self, epoch: GPS_Time, reward, cumulative_reward):
-        if not self.output_file or self.output_file.closed:
-            raise ValueError("Recorder has not been initialized or has been closed")
+        if self.output_file is None:
+            raise ValueError("Recorder has not been initialized")
+        if self.output_file.closed:
+            self.output_file = open(self.file_path, "a", newline="")
+            self.csv_writer = csv.writer(self.output_file)
 
         row = [epoch.calendar_column_str_d(), reward, cumulative_reward]
         self.csv_writer.writerow(row)
+        self.output_file.flush()
+
+    def write_batch(self, data: list):
+        if self.output_file is None:
+            raise ValueError("Recorder has not been initialized")
+        if self.output_file.closed:
+            self.output_file = open(self.file_path, "a", newline="")
+            self.csv_writer = csv.writer(self.output_file)
+
+        self.csv_writer.writerows(data)
         self.output_file.flush()
 
     def close(self):

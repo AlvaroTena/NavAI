@@ -67,3 +67,7 @@ training:
   rnn:
     enable: True
     window_size: 1
+
+eval:
+  model_path: models/
+  model_name: policy_247_enc

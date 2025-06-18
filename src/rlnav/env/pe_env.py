@@ -93,6 +93,7 @@ class PE_Env(py_environment.PyEnvironment):
         scenario: str = None,
         num_generations: int = None,
         filter_subset: bool = False,
+        eval_mode: bool = False,
     ):
         self.configMgr = configMgr
         self.wrapper_data = wrapper_data
@@ -105,6 +106,7 @@ class PE_Env(py_environment.PyEnvironment):
         self.transformers_path = transformers_path
         self.output_path = output_path
         self.name = name
+        self.eval_mode = eval_mode
 
         self.wrapper = None
 
@@ -262,7 +264,12 @@ class PE_Env(py_environment.PyEnvironment):
 
         _, ai_output = result
 
-        reward = self.rewardMgr.compute_reward(ai_output)
+        if self.eval_mode:
+            self.rewardMgr.update_agent(ai_output)
+            reward = np.zeros(self._reward_spec.shape, dtype=np.float32)
+        else:
+            reward = self.rewardMgr.compute_reward(ai_output)
+
         state = self._check_state()
         if isinstance(state, bool):
             if state:
@@ -316,10 +323,12 @@ class PE_Env(py_environment.PyEnvironment):
                 else self.wrapper_data.initial_epoch
             )
 
-            return (
-                self.rewardMgr.match_ref(self.prev_ai_epoch)
-                and self.prev_ai_epoch >= initial_epoch
-            )
+            valid_state = self.prev_ai_epoch >= initial_epoch
+
+            if not self.eval_mode:
+                valid_state &= self.rewardMgr.match_ref(self.prev_ai_epoch)
+
+            return valid_state
 
         state = self._process_epochs()
 

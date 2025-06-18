@@ -31,6 +31,14 @@ EXIT_FAILURE = 1
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
+gpus = tf.config.experimental.list_physical_devices("GPU")
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
+
 
 def create_parser():
     parser = argparse.ArgumentParser(
@@ -42,13 +50,6 @@ def create_parser():
         dest="config_file",
         required=True,
         help="Path to YAML configuration file",
-    )
-    parser.add_argument(
-        "-i",
-        "--policy_path",
-        dest="policy_path",
-        required=True,
-        help="Path to the policy directory",
     )
     parser.add_argument(
         "-o",
@@ -81,7 +82,7 @@ def main():
 
     Logger(args.output_path)
 
-    if not args.policy_path or not args.output_path or not args.debug_level:
+    if not args.output_path or not args.debug_level:
         Logger.log_message(
             Logger.Category.ERROR,
             Logger.Module.MAIN,
@@ -127,30 +128,9 @@ def main():
         npt_run,
     )
 
-    agent = create_ppo_agent(
-        (
-            tensor_spec.from_spec(create_observation_spec(min_values, max_values)),
-            tensor_spec.from_spec(create_action_spec()),
-            tensor_spec.from_spec(create_reward_spec()),
-        ),
-        npt_run,
-        rnn=config.training.rnn.enable,
+    policy = tf.saved_model.load(
+        os.path.join(config.eval.model_path, config.eval.model_name)
     )
-
-    policy_dir = os.path.normpath(args.policy_path)
-    if not os.path.exists(policy_dir):
-        Logger.log_message(
-            Logger.Category.ERROR,
-            Logger.Module.MAIN,
-            f"Policy path {policy_dir} does not exist.",
-        )
-        return EXIT_FAILURE
-
-    policy_checkpointer = common.Checkpointer(
-        ckpt_dir=policy_dir,
-        policy=agent.policy,
-    )
-    policy_checkpointer.initialize_or_restore()
 
     while wrapper_mgr.next_scenario(parsing_rate=args.parsing_rate):
         current = wrapper_mgr.scenario
@@ -175,17 +155,19 @@ def main():
             ),
             output_path=wrapper_mgr.output_path,
             name="eval_env",
+            eval_mode=True,
         )
-        eval_env = tf_py_environment.TFPyEnvironment(eval_env)
+        eval_env_tf = tf_py_environment.TFPyEnvironment(eval_env)
 
-        time_step = eval_env.reset()
-        policy_state = agent.policy.get_initial_state(batch_size=eval_env.batch_size)
+        time_step = eval_env_tf.reset()
+        policy_state = policy.get_initial_state(batch_size=eval_env_tf.batch_size)
 
-        while not eval_env._env.envs[0].is_done():  # pylint: disable=protected-access
-            policy_step = agent.policy.action(time_step, policy_state)
-            time_step = eval_env.step(policy_step.action)
+        while not eval_env.is_done():
+            policy_step = policy.action(time_step, policy_state)
+            time_step = eval_env_tf.step(policy_step.action)
             policy_state = policy_step.state
 
+        reward_mgr.finalize_evaluation()
         map_file = eval_env.update_map()
         reward_file = eval_env.get_reward_filepath()
         if npt_run._mode != "debug":
@@ -198,7 +180,7 @@ def main():
             f"Scenario {current} eval finished",
         )
 
-    eval_env.close()
+    eval_env_tf.close()
     npt_run.stop()
 
     Logger.log_message(
