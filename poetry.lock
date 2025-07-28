@@ -3942,6 +3942,22 @@ docs = ["myst-parser", "pydata-sphinx-theme", "sphinx-autodoc-typehints", "sphin
 test = ["ipykernel", "pre-commit", "pytest (<8)", "pytest-cov", "pytest-timeout"]
 
 [[package]]
+name = "kaleido"
+version = "0.2.1"
+description = "Static image export for web-based visualization libraries with zero dependencies"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "kaleido-0.2.1-py2.py3-none-macosx_10_11_x86_64.whl", hash = "sha256:ca6f73e7ff00aaebf2843f73f1d3bacde1930ef5041093fe76b83a15785049a7"},
+    {file = "kaleido-0.2.1-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:bb9a5d1f710357d5d432ee240ef6658a6d124c3e610935817b4b42da9c787c05"},
+    {file = "kaleido-0.2.1-py2.py3-none-manylinux1_x86_64.whl", hash = "sha256:aa21cf1bf1c78f8fa50a9f7d45e1003c387bd3d6fe0a767cfbbf344b95bdc3a8"},
+    {file = "kaleido-0.2.1-py2.py3-none-manylinux2014_aarch64.whl", hash = "sha256:845819844c8082c9469d9c17e42621fbf85c2b237ef8a86ec8a8527f98b6512a"},
+    {file = "kaleido-0.2.1-py2.py3-none-win32.whl", hash = "sha256:ecc72635860be616c6b7161807a65c0dbd9b90c6437ac96965831e2e24066552"},
+    {file = "kaleido-0.2.1-py2.py3-none-win_amd64.whl", hash = "sha256:4670985f28913c2d063c5734d125ecc28e40810141bdb0a46f15b76c1d45f23c"},
+]
+
+[[package]]
 name = "keras"
 version = "2.15.0"
 description = "Deep learning for humans."
@@ -4799,10 +4815,9 @@ typing-extensions = {version = ">=4.1.0", markers = "python_version < \"3.11\""}
 name = "narwhals"
 version = "1.30.0"
 description = "Extremely lightweight compatibility layer between dataframe libraries"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"rl\""
 files = [
     {file = "narwhals-1.30.0-py3-none-any.whl", hash = "sha256:443aa0a1abfae89bc65a6b888a7e310a03d1818bfb2ccd61c150199a5f954c17"},
     {file = "narwhals-1.30.0.tar.gz", hash = "sha256:0c50cc67a5404da501302882838ec17dce51703d22cd8ad89162d6f60ea0bb19"},
@@ -5597,6 +5612,26 @@ files = [
 ]
 
 [[package]]
+name = "pandarallel"
+version = "1.6.5"
+description = "An easy to use library to speed up computation (by parallelizing on multi CPUs) with pandas."
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "pandarallel-1.6.5.tar.gz", hash = "sha256:1c2df98ff6441e8ae13ff428ceebaa7ec42d731f7f972c41ce4fdef1d3adf640"},
+]
+
+[package.dependencies]
+dill = ">=0.3.1"
+pandas = ">=1"
+psutil = "*"
+
+[package.extras]
+dev = ["numpy", "pytest", "pytest-cov"]
+doc = ["mkdocs-material"]
+
+[[package]]
 name = "pandas"
 version = "2.2.3"
 description = "Powerful data structures for data analysis, time series, and statistics"
@@ -5918,15 +5953,14 @@ type = ["mypy (>=1.11.2)"]
 
 [[package]]
 name = "plotly"
-version = "6.0.0"
-description = "An open-source, interactive data visualization library for Python"
-optional = true
+version = "6.2.0"
+description = "An open-source interactive data visualization library for Python"
+optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"rl\""
 files = [
-    {file = "plotly-6.0.0-py3-none-any.whl", hash = "sha256:f708871c3a9349a68791ff943a5781b1ec04de7769ea69068adcd9202e57653a"},
-    {file = "plotly-6.0.0.tar.gz", hash = "sha256:c4aad38b8c3d65e4a5e7dd308b084143b9025c2cc9d5317fc1f1d30958db87d3"},
+    {file = "plotly-6.2.0-py3-none-any.whl", hash = "sha256:32c444d4c940887219cb80738317040363deefdfee4f354498cc0b6dab8978bd"},
+    {file = "plotly-6.2.0.tar.gz", hash = "sha256:9dfa23c328000f16c928beb68927444c1ab9eae837d1fe648dbcda5360c7953d"},
 ]
 
 [package.dependencies]
@@ -5934,7 +5968,12 @@ narwhals = ">=1.15.1"
 packaging = "*"
 
 [package.extras]
+dev = ["plotly[dev-optional]"]
+dev-build = ["build", "jupyter", "plotly[dev-core]"]
+dev-core = ["pytest", "requests", "ruff (==0.11.12)"]
+dev-optional = ["anywidget", "colorcet", "fiona (<=1.9.6) ; python_version <= \"3.8\"", "geopandas", "inflect", "numpy", "orjson", "pandas", "pdfrw", "pillow", "plotly-geo", "plotly[dev-build]", "plotly[kaleido]", "polars[timezone]", "pyarrow", "pyshp", "pytz", "scikit-image", "scipy", "shapely", "statsmodels", "vaex ; python_version <= \"3.9\"", "xarray"]
 express = ["numpy"]
+kaleido = ["kaleido (>=1.0.0)"]
 
 [[package]]
 name = "pluggy"
@@ -9093,4 +9132,4 @@ rl = ["folium", "genv", "geopy", "nbformat", "neptune-tensorboard", "plotly", "p
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.11"
-content-hash = "2fdf0bc2ff7d18d05e5a2a4bf6adbd4b7b28aa46169826b463d9a7c89ba09ad7"
+content-hash = "c581674c6733f5cfa56e1542127e6091d5397c420225ef52843d652664265c22"
