@@ -176,6 +176,11 @@ class RewardManager:
         self.base_data = pd.concat([self.base_data, pe_base], axis=0, ignore_index=True)
         self.base_data.sort_values(by=["RawEpoch"], inplace=True)
 
+    def update_agent(self, ai_output: OutputStr):
+        pe_ai = self._get_record_output(ai_output)
+        self.ai_data = pd.concat([self.ai_data, pe_ai], axis=0, ignore_index=True)
+        self.ai_data.sort_values(by=["RawEpoch"], inplace=True)
+
     def calculate_propagated_base_positions(self):
         pe_ref_df = self._match_and_extract_common_epochs(self.base_data)
 
@@ -617,7 +622,81 @@ class RewardManager:
             ai_errors[worse_indices] / (base_errors[worse_indices] + epsilon)
         )
 
-        return rewards
+        return np.nan_to_num(rewards, nan=-10.0, posinf=10.0, neginf=-10.0)
+
+    def finalize_evaluation(self):
+        base_errors = {
+            "Epoch": self.base_data["RawEpoch"],
+            "NorthError": self.base_data["NorthErrorProp"],
+            "EastError": self.base_data["EastErrorProp"],
+            "UpError": self.base_data["UpErrorProp"],
+            "HorizontalError": self.base_data["HorizontalErrorProp"],
+            "VerticalError": self.base_data["VerticalErrorProp"],
+        }
+
+        ai_ref_df = self._match_and_extract_common_epochs(self.ai_data)
+        if ai_ref_df is not None:
+            ai_df = self._get_error_position_ref_span(ai_ref_df)
+            # Guardamos posiciones IA para el mapa
+            ai_pos = ai_df[["RawEpoch", "LAT_PROP", "LON_PROP"]].set_index("RawEpoch")
+            self.ai_positions = pd.concat([self.ai_positions, ai_pos])
+            # Errores IA
+            ai_errors = {
+                "Epoch": ai_df["RawEpoch"],
+                "NorthError": ai_df["NorthErrorProp"],
+                "EastError": ai_df["EastErrorProp"],
+                "UpError": ai_df["UpErrorProp"],
+                "HorizontalError": ai_df["HorizontalErrorProp"],
+                "VerticalError": ai_df["VerticalErrorProp"],
+            }
+        else:
+            ai_errors = None
+
+        rewards = None
+        if base_errors is not None and ai_errors is not None:
+            df_base = self.base_data.set_index("RawEpoch")
+            df_ai = ai_df.set_index("RawEpoch")
+            common = df_base.index.intersection(df_ai.index)
+            be = np.column_stack(
+                [
+                    df_base.loc[common, "NorthErrorProp"].values,
+                    df_base.loc[common, "EastErrorProp"].values,
+                    df_base.loc[common, "UpErrorProp"].values,
+                ]
+            )
+            ae = np.column_stack(
+                [
+                    df_ai.loc[common, "NorthErrorProp"].values,
+                    df_ai.loc[common, "EastErrorProp"].values,
+                    df_ai.loc[common, "UpErrorProp"].values,
+                ]
+            )
+            rr = self._calculate_element_wise_log_ratio_rewards(ae, be)
+
+            rewards = np.clip(rr, -10.0, 10.0, dtype=np.float32)
+
+            instants = []
+            cumulatives = []
+
+            for reward in rewards:
+                self.reward.update(reward)
+
+                instants.append(self.reward.get_differentiated_value())
+                cumulatives.append(self.reward.get_cumulative_value())
+
+            rows = [
+                [
+                    f"{epoch.year:4}  {epoch.month:2}  {epoch.day:2}  {epoch.hour:2}  {epoch.minute:2}  {epoch.second + epoch.microsecond/1e6:9.6f}",
+                    inst,
+                    cum,
+                ]
+                for epoch, inst, cum in zip(list(common), instants, cumulatives)
+            ]
+            self.reward_rec.write_batch(rows)
+
+            rewards = {"Epoch": list(common), "Rewards": rewards}
+
+        return {"base_errors": base_errors, "ai_errors": ai_errors, "rewards": rewards}
 
     def _create_map(self):
         self.map_initialized = True
@@ -699,7 +778,7 @@ class RewardManager:
 
         return self.map_file
 
-    def match_ref(self, epoch: Union[pd.Timestamp, GPS_Time]):
+    def match_ref(self, epoch: Union[pd.Timestamp, GPS_Time]) -> bool:
         if isinstance(epoch, GPS_Time):
             raw_epoch = pd.to_datetime(
                 epoch.calendar_column_str_d(),

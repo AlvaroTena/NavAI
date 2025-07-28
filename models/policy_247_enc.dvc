@@ -1,0 +1,6 @@
+outs:
+- md5: c66c6c61721148af2a1a6a6eb2e66211.dir
+  size: 10386582
+  nfiles: 5
+  hash: md5
+  path: policy_247_enc

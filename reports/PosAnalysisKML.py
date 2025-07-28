@@ -5,7 +5,7 @@ import subprocess
 
 def execute_pos_analysis(base_dir, scenario, ai_type, rtppp_file):
     pos_file = f"{base_dir}/{scenario}/{ai_type}/{rtppp_file}"
-    ref_file = f"data/scenarios/{scenario}/INPUTS/references/kinematic_reference.txt"
+    ref_file = f"data/scenarios/{scenario}/INPUTS/REF/kinematic_reference.parquet"
     output_dir = f"{base_dir}/{scenario}/{ai_type}/PosAnalysis"
 
     command = [
@@ -54,7 +54,7 @@ def main(base_dir):
     scenarios = find_scenarios(base_dir)
 
     for scenario in scenarios:
-        for ai_type in ["AI", "noAI"]:
+        for ai_type in ["AI_gen1/eval_env", "noAI"]:
             scenario_dir = os.path.join(base_dir, scenario, ai_type)
             if os.path.isdir(scenario_dir):
                 for file_name in os.listdir(scenario_dir):

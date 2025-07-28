@@ -24,7 +24,10 @@ dependencies = [
     "tables (>=3.10.0,<4.0.0)",
     "simplejson (<=3.18)",
     "swifter (>=1.4.0,<2.0.0)",
-    "python-dotenv (>=1.1.0,<2.0.0)"
+    "python-dotenv (>=1.1.0,<2.0.0)",
+    "kaleido (==0.2.1)",
+    "plotly (>=6.1.1)",
+    "pandarallel (>=1.6.5,<2.0.0)"
 ]
 
 [project.optional-dependencies]
@@ -39,6 +42,7 @@ packages = [
 ]
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
+debugpy = "^1.8.14"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

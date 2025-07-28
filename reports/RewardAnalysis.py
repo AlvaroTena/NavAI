@@ -1,6 +1,7 @@
 import argparse
 import os
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -8,11 +9,24 @@ gps_start_date = pd.to_datetime("1980 1 6 0 0 0.000000", format="%Y %m %d %H %M 
 
 
 def load_reward_file(filepath):
-    df = pd.read_csv(filepath, skiprows=1, names=["time", "reward"])
+    # Leer el CSV con la cabecera correcta
+    df = pd.read_csv(filepath)
+
+    # Convertir la columna epoch a datetime
     df["time"] = pd.to_datetime(
-        df["time"], format="%Y %m %d %H %M %S.%f", errors="coerce"
+        df["epoch"], format="%Y   %m  %d   %H  %M   %S.%f", errors="coerce"
     )
-    df = df[(df["time"] != gps_start_date) & df["time"].notna() & df["reward"].notna()]
+
+    # Extraer los componentes del cumulative_reward (que viene como string de array)
+    df["cumulative_reward"] = df["cumulative_reward"].apply(
+        lambda x: np.array([float(n) for n in x.strip("[]").split()])
+    )
+    df["north"] = df["cumulative_reward"].apply(lambda x: x[0])
+    df["east"] = df["cumulative_reward"].apply(lambda x: x[1])
+    df["up"] = df["cumulative_reward"].apply(lambda x: x[2])
+
+    # Filtrar filas inválidas
+    df = df[(df["time"] != gps_start_date) & df["time"].notna()]
     df.sort_values("time", inplace=True)  # Ensure the data is sorted by time
     return df
 
@@ -82,14 +96,34 @@ def create_and_save_plot_for_reward_file(reward_file, scenario_dir, output_path)
 
     fig = go.Figure()
 
+    # Añadir una traza para cada componente
     fig.add_trace(
         go.Scatter(
             x=df["time"],
-            y=df["reward"],
+            y=df["north"],
             mode="lines",
-            name=os.path.basename(reward_file),
+            name="North",
+            line=dict(color="red"),
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=df["time"],
+            y=df["east"],
+            mode="lines",
+            name="East",
+            line=dict(color="green"),
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=df["time"],
+            y=df["up"],
+            mode="lines",
+            name="Up",
             line=dict(color="blue"),
-            showlegend=False,
         )
     )
 
@@ -100,8 +134,8 @@ def create_and_save_plot_for_reward_file(reward_file, scenario_dir, output_path)
     fig.update_layout(
         title_text=os.path.basename(reward_file),
         xaxis_title="Time",
-        yaxis_title="Reward",
-        showlegend=False,
+        yaxis_title="Reward Components (NEU)",
+        showlegend=True,
     )
 
     # Save the plot as a PNG file with the same name as the CSV file

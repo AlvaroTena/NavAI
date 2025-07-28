@@ -7,11 +7,11 @@ neptune:
 
 scenarios:
   path: data/scenarios/
-  n_scenarios: 10
+  n_scenarios: -1
   priority: [
     scenario_931_000_GPSGALBDS_CSIRELAND_L1L2_KINEMATIC_20231003,
   ]
-  skip_first: 0
+  skip_first: 10
   n_generations: 1
   subscenarios: [
     scenario_931_000_GPSGALBDS_CSIRELAND_L1L2_KINEMATIC_20231003_01_LOWH_LOWV,
@@ -52,7 +52,7 @@ scenarios:
     scenario_913_000_CS_KINEMATIC_20230310_URBAN_09_HIGHH_HIGHV,
     scenario_913_000_CS_KINEMATIC_20230310_URBAN_13_HIGHH_HIGHV,
   ]
-  subscenarios_done: 3
+  subscenarios_done: 0
   curriculum_learning: True
 
 processed_data:
@@ -67,3 +67,7 @@ training:
   rnn:
     enable: True
     window_size: 1
+
+eval:
+  model_path: models/
+  model_name: policy_247_enc

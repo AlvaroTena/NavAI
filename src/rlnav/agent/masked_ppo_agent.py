@@ -29,10 +29,12 @@ def build_mask_for_heads(mask_bin: tf.Tensor) -> tf.Tensor:
     """
     rank = tf.rank(mask_bin)
 
-    if rank not in (2, 3):
-        raise ValueError("mask_bin must be of rank 2 or 3.")
-
-    return tf.cast(mask_bin, tf.bool)
+    assert_ok = tf.Assert(
+        tf.logical_or(tf.equal(rank, 2), tf.equal(rank, 3)),
+        ["mask_bin must have rank 2 or 3. Rank =", rank],
+    )
+    with tf.control_dependencies([assert_ok]):
+        return tf.cast(mask_bin, tf.bool)
 
 
 def splitter(
