@@ -259,7 +259,7 @@ def load_scenarios_list(
 
     # Slice by first and last indices
     if last_scen != -1:
-        selected = all_scenarios[first_scen:last_scen]
+        selected = all_scenarios[first_scen : last_scen + first_scen]
     else:
         selected = all_scenarios[first_scen:]
 

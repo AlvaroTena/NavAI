@@ -132,6 +132,7 @@ def main():
         os.path.join(config.eval.model_path, config.eval.model_name)
     )
 
+    eval_env_tf = None
     while wrapper_mgr.next_scenario(parsing_rate=args.parsing_rate):
         current = wrapper_mgr.scenario
         Logger.log_message(
@@ -180,7 +181,8 @@ def main():
             f"Scenario {current} eval finished",
         )
 
-    eval_env_tf.close()
+    if eval_env_tf:
+        eval_env_tf.close()
     npt_run.stop()
 
     Logger.log_message(
