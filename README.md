@@ -118,7 +118,11 @@ MLNav works with **offline processed data** that has already been computed by th
   - **Parallel Environments**: 20 parallel environments for experience collection
   - **Active Environments**: 10 active environments per iteration
   - **RNN Support**: Optional recurrent networks for temporal dependencies
-  - **Continuous Evaluation**: Cascaded environments for ongoing assessment
+  - **Cascaded Evaluation**: Continuous policy validation using delayed environment subsets:
+    - **Parallel Subsets**: Multiple environment subsets process identical data simultaneously
+    - **Stochastic Experience**: Each subset generates different experiences due to policy stochasticity
+    - **Delayed Validation**: After policy updates, subsequent environment subsets encounter the same observations with controlled delay
+    - **Policy Consistency**: Validates that policy improvements align with previously visited observations
 
 ### Shared Components
 - **NavUtils**: Centralized logging, configuration management, and utility functions
