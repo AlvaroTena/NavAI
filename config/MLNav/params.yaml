@@ -2,20 +2,20 @@ base:
   project: MLNav
 
 reader:
-  path: data/MLNav/scenario_931v2/raw
+  path: data/MLNav/raw/
   n_files: -1
 
 process:
-  path: data/MLNav/scenario_931v2/processed/
+  path: data/MLNav/processed/
   name: AI_Multipath_Processed.h5
 
 normalize:
-  path: data/MLNav/scenario_931v2/normalized/
+  path: data/MLNav/normalized/
   name: AI_Multipath_Normalized.h5
-  transformers_path: data/MLNav/retrain/transformers/
+  transformers_path: data/MLNav/transformers/
 
 model:
-  path: data/MLNav/retrain/models/
+  path: data/MLNav/models/
   name: model.joblib
   
   trials: 
@@ -38,7 +38,7 @@ model:
       verbose: [0]
 
 reports:
-  path: data/MLNav/scenario_931v2/reports/
+  path: reports/MLNav/
   
   predictions:
     name: AI_Multipath_Predictions.h5
